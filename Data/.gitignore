@@ -1,0 +1,32 @@
+# Ignore all files in Data directories
+**/Dataset_1/
+**/Ethereum_smart_contract_datast/
+
+# Ignore macOS metadata
+.DS_Store
+__MACOSX/
+
+# Ignore common large file formats that might be in datasets
+*.zip
+*.tar
+*.tar.gz
+*.rar
+*.7z
+
+# Ignore Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Ignore IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Ignore OS files
+.DS_Store
+Thumbs.db
+

@@ -42,8 +42,15 @@ def create_csv_from_sol_files():
                 }
 
                 # Ajouter une colonne True/False pour chaque type de vulnérabilité
+                has_vulnerability = False
                 for vuln_type in vulnerability_types:
-                    entry[vuln_type] = (vuln_type == category_label)
+                    is_vuln = (vuln_type == category_label)
+                    entry[vuln_type] = is_vuln
+                    if is_vuln:
+                        has_vulnerability = True
+
+                # Ajouter la colonne safe (après la boucle)
+                entry['safe'] = not has_vulnerability
 
                 data.append(entry)
 

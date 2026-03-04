@@ -2,6 +2,10 @@
 **/Dataset_1/
 **/Ethereum_smart_contract_datast/
 
+# Inclure les CSV dans Data/
+!Data/*.csv
+!Data/**/*.csv
+
 # Ignore macOS metadata
 .DS_Store
 __MACOSX/

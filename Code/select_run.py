@@ -120,7 +120,7 @@ Examples:
   # pick 3, reproducible run
   python3 select_and_run_mythril.py /path/to/vuln-root --n 3 --seed 42
 
-  # use a custom myth path and longer timeout
+  # custom line
   python3 /home/tim/PycharmProjects/Bachelor_work/Code/select_run.py /home/tim/PycharmProjects/Bachelor_work/Data/Dataset_test --n 1 --seed 67 --timeout 120
 """
     )

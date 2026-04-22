@@ -1,69 +1,57 @@
-import os
-import pandas as pd
-import glob
-import pathlib
+import csv
+from pathlib import Path
 
-data_dir = "../Data/Dataset_1/Dataset"
-output_file = "../Data/Dataset_1_labelled.csv"
-
-
-def get_labels_from_path(path):
-    folder = pathlib.Path(path)
-    return folder.parent.name
+SAFE_ROOT = Path('/home/tim/PycharmProjects/Bachelor_work/Data/Dataset_test/SAFE')
+UNSAFE_ROOT = Path('/home/tim/PycharmProjects/Bachelor_work/Data/Dataset_test/UNSAFE')
+OUTPUT_CSV = Path('/home/tim/PycharmProjects/Bachelor_work/Data/Dataset_test/master_dataset.csv')
 
 
-def create_csv_from_sol_files():
-    data = []
-
-    # Récupérer tous les types de vulnérabilités (noms des répertoires)
-    vulnerability_types = [os.path.basename(d) for d in glob.glob(os.path.join(data_dir, "*")) if os.path.isdir(d)]
-
-    # Parcourir tous les répertoires de vulnérabilités
-    for category_dir in glob.glob(os.path.join(data_dir, "*")):
-        if os.path.isdir(category_dir):
-            category_label = os.path.basename(category_dir)
-
-            # Trouver tous les fichiers .sol dans ce répertoire
-            for sol_file in glob.glob(os.path.join(category_dir, "*.sol")):
-                file_name = os.path.basename(sol_file)
-
-                # Lire le contenu du fichier
-                try:
-                    with open(sol_file, 'r', encoding='utf-8') as f:
-                        content = f.read()
-                except Exception as e:
-                    print(f"Erreur lors de la lecture de {sol_file}: {e}")
-                    content = ""
-
-                # Créer une entrée avec colonnes booléennes pour chaque type
-                entry = {
-                    'file': sol_file,
-                    'content': content
-                }
-
-                # Ajouter une colonne True/False pour chaque type de vulnérabilité
-                has_vulnerability = False
-                for vuln_type in vulnerability_types:
-                    is_vuln = (vuln_type == category_label)
-                    entry[vuln_type] = is_vuln
-                    if is_vuln:
-                        has_vulnerability = True
-
-                # Ajouter la colonne safe (après la boucle)
-                entry['safe'] = not has_vulnerability
-
-                data.append(entry)
-
-    # Créer et sauvegarder le DataFrame
-    df = pd.DataFrame(data)
-    df.to_csv(output_file, index=False)
-    print(f"CSV créé : {output_file}")
-    print(f"Nombre de fichiers : {len(df)}")
-    print(f"Types de vulnérabilités : {vulnerability_types}")
-
-    return df
+def detect_true_label(file_path: Path, root: Path, binary_label: str) -> str:
+    if binary_label == 'SAFE':
+        return 'SAFE'
+    rel_parts = file_path.relative_to(root).parts
+    if len(rel_parts) >= 2:
+        return rel_parts[0]
+    return 'UNSAFE'
 
 
-# Exécuter
-if __name__ == "__main__":
-    create_csv_from_sol_files()
+def iter_sol_files(root: Path):
+    if not root.exists():
+        return
+    yield from root.rglob('*.sol')
+
+
+rows = []
+
+for fp in iter_sol_files(SAFE_ROOT):
+    try:
+        content = fp.read_text(encoding='utf-8', errors='ignore')
+    except Exception:
+        content = ''
+    rows.append({
+        'file_path': str(fp),
+        'true_label': 'SAFE',
+        'binary_label': 'SAFE',
+        'content': content,
+    })
+
+for fp in iter_sol_files(UNSAFE_ROOT):
+    true_label = detect_true_label(fp, UNSAFE_ROOT, 'UNSAFE')
+    try:
+        content = fp.read_text(encoding='utf-8', errors='ignore')
+    except Exception:
+        content = ''
+    rows.append({
+        'file_path': str(fp),
+        'true_label': true_label,
+        'binary_label': 'UNSAFE',
+        'content': content,
+    })
+
+OUTPUT_CSV.parent.mkdir(parents=True, exist_ok=True)
+with OUTPUT_CSV.open('w', newline='', encoding='utf-8') as f:
+    writer = csv.DictWriter(f, fieldnames=['file_path', 'true_label', 'binary_label', 'content'])
+    writer.writeheader()
+    writer.writerows(rows)
+
+print(f'Wrote {len(rows)} rows to {OUTPUT_CSV}')

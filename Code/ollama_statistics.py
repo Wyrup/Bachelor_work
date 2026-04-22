@@ -5,6 +5,7 @@ from sklearn.metrics import accuracy_score, precision_recall_fscore_support, con
 
 def compute_statistics(input_dir: Path, output_dir: Path = None):
     """
+    test
     Génère les statistiques à partir des fichiers CSV générés par ollama_batch.py
 
     Args:

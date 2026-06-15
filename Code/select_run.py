@@ -11,6 +11,9 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
+import pandas as pd
+from sklearn.metrics import accuracy_score, precision_recall_fscore_support, confusion_matrix
+
 LABELS = ["BN", "DE", "EF", "SE", "OF", "RE", "TP", "UC"]
 
 SWC_TO_LABEL = {
@@ -173,22 +176,43 @@ def run_mythril(file_path, timeout, myth_cmd):
     cmd = [myth_cmd, "analyze", str(file_path), "--execution-timeout", str(timeout)]
     start = time.time()
     try:
-        proc    = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout + 60)
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout + 60)
         elapsed = round(time.time() - start, 2)
         combined = (proc.stdout or "") + "\n" + (proc.stderr or "")
-        issues   = parse_text_output(combined)
-        status   = "ok" if proc.returncode == 0 else "error"
+        issues = parse_text_output(combined)
+
+        # If Mythril printed a Python traceback treat as runtime error
         if "Traceback" in combined:
             status = "runtime_error"
-        return {"file": str(file_path), "seconds": elapsed, "returncode": proc.returncode,
-                "status": status, "issues": issues,
-                "stdout": proc.stdout[:4000], "stderr": proc.stderr[:2000]}
+        # If we parsed issues consider it a successful analysis
+        elif issues:
+            status = "ok"
+        # Otherwise fall back to exit code
+        else:
+            status = "ok" if proc.returncode == 0 else "error"
+
+        return {
+            "file": str(file_path),
+            "seconds": elapsed,
+            "returncode": proc.returncode,
+            "status": status,
+            "issues": issues,
+            "stdout": proc.stdout[:4000],
+            "stderr": proc.stderr[:2000],
+        }
+
     except subprocess.TimeoutExpired as e:
         elapsed = round(time.time() - start, 2)
-        out     = (e.stdout or "") + "\n" + (e.stderr or "")
-        return {"file": str(file_path), "seconds": elapsed, "returncode": None,
-                "status": "timeout", "issues": parse_text_output(out),
-                "stdout": (e.stdout or "")[:4000], "stderr": (e.stderr or "")[:2000]}
+        out = (e.stdout or "") + "\n" + (e.stderr or "")
+        return {
+            "file": str(file_path),
+            "seconds": elapsed,
+            "returncode": None,
+            "status": "timeout",
+            "issues": parse_text_output(out),
+            "stdout": (e.stdout or "")[:4000],
+            "stderr": (e.stderr or "")[:2000],
+        }
 
 
 # ─────────────────────────────────────────────
@@ -291,6 +315,152 @@ def write_outputs(runs, rows, outdir):
     print(f"  - picked_files.json")
     print(f"  - picked_files.csv")
     print(f"  - eval_input.csv")
+
+
+# ─────────────────────────────────────────────
+# Statistics computation
+# ─────────────────────────────────────────────
+
+def compute_statistics(outdir):
+    outdir = Path(outdir)
+    stats_dir = outdir / "stats"
+    stats_dir.mkdir(parents=True, exist_ok=True)
+
+    csv_path = outdir / "picked_files.csv"
+    if not csv_path.exists():
+        print(f"  [warn] No {csv_path} found, skipping statistics")
+        return False
+
+    data = pd.read_csv(csv_path)
+    data = data[data["myth_status"] == "ok"].copy()
+
+    if len(data) == 0:
+        print("  [warn] No data with myth_status == 'ok'")
+        return False
+
+    data["true_binary"] = data["true_label"].apply(lambda x: "SAFE" if x == "SAFE" else "UNSAFE")
+
+    def pred_binary(pred_class):
+        if pred_class == "SAFE":
+            return "SAFE"
+        return "UNSAFE"
+
+    data["pred_binary"] = data["predicted_vuln_class"].apply(pred_binary)
+
+    binary_labels = ["SAFE", "UNSAFE"]
+    b_acc = accuracy_score(data["true_binary"], data["pred_binary"])
+    b_prec, b_rec, b_f1, b_sup = precision_recall_fscore_support(
+        data["true_binary"], data["pred_binary"], labels=binary_labels, zero_division=0
+    )
+
+    binary_metrics = pd.DataFrame({
+        "label": binary_labels,
+        "precision": b_prec,
+        "recall": b_rec,
+        "f1": b_f1,
+        "support": b_sup,
+    })
+    binary_metrics.to_csv(stats_dir / "binary_metrics.csv", index=False)
+
+    pd.DataFrame([{
+        "accuracy": b_acc,
+        "macro_f1": binary_metrics["f1"].mean(),
+        "n_rows": len(data)
+    }]).to_csv(stats_dir / "binary_summary.csv", index=False)
+
+    binary_cm = confusion_matrix(data["true_binary"], data["pred_binary"], labels=binary_labels)
+    pd.DataFrame(binary_cm, index=binary_labels, columns=binary_labels).to_csv(
+        stats_dir / "binary_confusion_matrix.csv")
+
+    vuln_map = {
+        "BN": "block_number_dependency",
+        "DE": "dangerous_delegatecall",
+        "EF": "ether_frozen",
+        "SE": "ether_strict_equality",
+        "OF": "integer_overflow",
+        "RE": "reentrancy",
+        "TP": "timestamp_dependency",
+        "UC": "unchecked_external_call",
+    }
+
+    rows = []
+    for label in LABELS:
+        subset = data[data["true_label"].isin([label, "SAFE"])].copy()
+
+        if len(subset) == 0:
+            continue
+
+        subset["true_onevsrest"] = subset["true_label"].apply(lambda x: label if x == label else "NOT_" + label)
+
+        def pred_onevsrest(pred_class):
+            if not isinstance(pred_class, str):
+                return "NOT_" + label
+            pred_labels = set(p.strip() for p in pred_class.split(";") if p.strip())
+            if label in pred_labels:
+                return label
+            return "NOT_" + label
+
+        subset["pred_onevsrest"] = subset["predicted_vuln_class"].apply(pred_onevsrest)
+
+        labels_eval = [label, "NOT_" + label]
+        acc = accuracy_score(subset["true_onevsrest"], subset["pred_onevsrest"])
+        prec, rec, f1, sup = precision_recall_fscore_support(
+            subset["true_onevsrest"], subset["pred_onevsrest"], labels=labels_eval, zero_division=0
+        )
+
+        rows.append({
+            "label": label,
+            "positive_class_precision": prec[0],
+            "positive_class_recall": rec[0],
+            "positive_class_f1": f1[0],
+            "accuracy": acc,
+            "support_positive": int(sup[0]),
+            "support_negative": int(sup[1]),
+        })
+
+    one_vs_rest = pd.DataFrame(rows)
+    one_vs_rest.to_csv(stats_dir / "one_vs_rest_metrics.csv", index=False)
+
+    def pred_strict_multiclass(pred_class):
+        if not isinstance(pred_class, str):
+            return "SAFE"
+        pred_labels = set(p.strip() for p in pred_class.split(";") if p.strip() and p.strip() in LABELS)
+        if len(pred_labels) == 0:
+            return "SAFE"
+        if len(pred_labels) == 1:
+            return pred_labels.pop()
+        return "MULTI"
+
+    data["pred_strict_multiclass"] = data["predicted_vuln_class"].apply(pred_strict_multiclass)
+    multiclass_labels = ["SAFE", "BN", "DE", "EF", "OF", "RE", "SE", "TP", "UC", "MULTI"]
+
+    mc_prec, mc_rec, mc_f1, mc_sup = precision_recall_fscore_support(
+        data["true_label"], data["pred_strict_multiclass"], labels=multiclass_labels, zero_division=0
+    )
+    multiclass_metrics = pd.DataFrame({
+        "label": multiclass_labels,
+        "precision": mc_prec,
+        "recall": mc_rec,
+        "f1": mc_f1,
+        "support": mc_sup,
+    })
+    multiclass_metrics.to_csv(stats_dir / "strict_multiclass_metrics.csv", index=False)
+
+    mc_acc = accuracy_score(data["true_label"], data["pred_strict_multiclass"])
+    pd.DataFrame([{
+        "accuracy": mc_acc,
+        "macro_f1_excluding_multi": multiclass_metrics[multiclass_metrics["label"] != "MULTI"]["f1"].mean(),
+        "n_rows": len(data)
+    }]).to_csv(stats_dir / "strict_multiclass_summary.csv", index=False)
+
+    pd.DataFrame(
+        confusion_matrix(data["true_label"], data["pred_strict_multiclass"], labels=multiclass_labels),
+        index=multiclass_labels,
+        columns=multiclass_labels,
+    ).to_csv(stats_dir / "strict_multiclass_confusion_matrix.csv")
+
+    print(f"Statistics written to: {stats_dir}/")
+    return True
 
 
 # ─────────────────────────────────────────────
@@ -435,6 +605,18 @@ Output folders are named automatically:
           f"elapsed: {format_duration(elapsed_total)} | done\n")
 
     write_outputs(runs, rows, outdir)
+
+    print("\n" + "=" * 60)
+    print("📊 Generating statistics...")
+    print("=" * 60 + "\n")
+
+    try:
+        if compute_statistics(outdir):
+            print("✅ Statistics generated successfully!")
+        else:
+            print("⚠️  Unable to generate statistics (no valid data)")
+    except Exception as e:
+        print(f"❌ Error generating statistics: {e}")
 
 
 if __name__ == "__main__":

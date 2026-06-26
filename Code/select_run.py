@@ -17,13 +17,13 @@ from sklearn.metrics import accuracy_score, precision_recall_fscore_support, con
 LABELS = ["BN", "DE", "EF", "SE", "OF", "RE", "TP", "UC"]
 
 SWC_TO_LABEL = {
-    "SWC-116": "BN",  "SWC-120": "BN",
-    "SWC-112": "DE",  "SWC-124": "DE",  "SWC-127": "DE",
-    "SWC-105": "EF",  "SWC-106": "EF",  "SWC-128": "EF",
+    "SWC-116": "BN", "SWC-120": "BN",
+    "SWC-112": "DE", "SWC-124": "DE", "SWC-127": "DE",
+    "SWC-105": "EF", "SWC-106": "EF", "SWC-128": "EF",
     "SWC-115": "SE",
-    "SWC-101": "OF",  "SWC-110": "OF",
+    "SWC-101": "OF", "SWC-110": "OF",
     "SWC-107": "RE",
-    "SWC-104": "UC",  "SWC-113": "UC",
+    "SWC-104": "UC", "SWC-113": "UC",
     "SWC-100": "OTHER", "SWC-102": "OTHER", "SWC-103": "OTHER",
     "SWC-108": "OTHER", "SWC-109": "OTHER", "SWC-111": "OTHER",
     "SWC-114": "OTHER", "SWC-117": "OTHER", "SWC-118": "OTHER",
@@ -48,16 +48,12 @@ KEYWORD_TO_LABEL = {
 _print_lock = threading.Lock()
 
 
-# ─────────────────────────────────────────────
-# File collection & selection
-# ─────────────────────────────────────────────
-
 def collect_sol_files(folder):
     return sorted([p for p in Path(folder).rglob("*.sol") if p.is_file()])
 
 
 def filename_numeric_key(path):
-    m = re.search(r'(\d+)', path.stem)
+    m = re.search(r"(\d+)", path.stem)
     if m:
         return (int(m.group(1)), path.name.lower())
     return (10 ** 18, path.name.lower())
@@ -92,8 +88,8 @@ def choose_files(root, n=None, mode="random", batch_start=None, batch_end=None):
         elif mode == "range":
             sorted_files = sorted(files, key=filename_numeric_key)
             start_idx = max(batch_start - 1, 0)
-            end_idx   = min(batch_end, len(sorted_files))
-            selected  = sorted_files[start_idx:end_idx]
+            end_idx = min(batch_end, len(sorted_files))
+            selected = sorted_files[start_idx:end_idx]
             available = len(sorted_files)
             if batch_start > available:
                 print(f"  [warn] {label}: start={batch_start} exceeds total files ({available}), skipping", file=sys.stderr)
@@ -108,88 +104,133 @@ def choose_files(root, n=None, mode="random", batch_start=None, batch_end=None):
     return picked, missing
 
 
-# ─────────────────────────────────────────────
-# Mythril output parsing
-# ─────────────────────────────────────────────
+def normalize_swc_id(value):
+    if value is None:
+        return ""
+    value = str(value).strip().upper()
+    if not value:
+        return ""
+    return value if value.startswith("SWC-") else f"SWC-{value}"
 
-def parse_text_output(text):
-    issues, seen = [], set()
-    blocks = re.split(r'\n={3,}|\n-{3,}', text)
-    if len(blocks) < 2:
-        blocks = re.split(r'(?=SWC ID:)', text, flags=re.I)
-    for block in blocks:
-        block = block.strip()
-        if len(block) < 20:
+
+def parse_mythril_json_output(text):
+    text = (text or "").strip()
+    if not text:
+        return {"issues": [], "logs": [], "parse_error": "empty_output"}
+
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        return {"issues": [], "logs": [], "parse_error": "invalid_json"}
+
+    if isinstance(data, list):
+        entries = data
+    elif isinstance(data, dict):
+        entries = [data]
+    else:
+        return {"issues": [], "logs": [], "parse_error": "unexpected_json_type"}
+
+    issues, logs = [], []
+    seen = set()
+
+    for entry in entries:
+        if not isinstance(entry, dict):
             continue
-        swc_match = re.search(r'SWC[-_ ]?ID[:\s]*(SWC-\d+|\d+)', block, re.I)
-        if not swc_match:
-            continue
-        raw = swc_match.group(1).strip()
-        swc_id = raw.upper() if raw.upper().startswith("SWC-") else "SWC-" + raw
-        sev_m   = re.search(r'Severity[:\s]*(\w+)',                 block, re.I)
-        title_m = re.search(r'Title[:\s]*(.+?)(?:\n|$)',            block, re.I)
-        desc_m  = re.search(r'Description[:\s]*(.*?)(?:\n{2,}|$)', block, re.S | re.I)
-        severity    = sev_m.group(1).strip()                  if sev_m   else "Unknown"
-        title       = title_m.group(1).strip()                if title_m else ""
-        description = " ".join(desc_m.group(1).split())[:500] if desc_m  else ""
-        key = (swc_id, severity, title)
-        if key in seen:
-            continue
-        seen.add(key)
-        issues.append({"swc_id": swc_id, "severity": severity, "title": title, "description": description})
-    return issues
+
+        meta = entry.get("meta", {})
+        if isinstance(meta, dict):
+            for log in meta.get("logs", []) or []:
+                if isinstance(log, dict):
+                    logs.append({
+                        "level": str(log.get("level", "")).lower(),
+                        "hidden": bool(log.get("hidden", False)),
+                        "msg": str(log.get("msg", "")).strip(),
+                    })
+
+        for issue in entry.get("issues", []) or []:
+            if not isinstance(issue, dict):
+                continue
+
+            swc_id = normalize_swc_id(issue.get("swcID") or issue.get("swc_id") or issue.get("swc-id"))
+            severity = str(issue.get("severity") or "Unknown").strip()
+            title = str(issue.get("swcTitle") or issue.get("title") or "").strip()
+
+            desc = issue.get("description", "")
+            if isinstance(desc, dict):
+                head = str(desc.get("head", "")).strip()
+                tail = str(desc.get("tail", "")).strip()
+                description = " ".join(x for x in [head, tail] if x).strip()
+            else:
+                description = str(desc).strip()
+
+            key = (swc_id, severity, title, description[:200])
+            if key in seen:
+                continue
+            seen.add(key)
+            issues.append({
+                "swc_id": swc_id,
+                "severity": severity,
+                "title": title,
+                "description": description[:1000],
+            })
+
+    return {"issues": issues, "logs": logs, "parse_error": None}
 
 
 def issues_to_vuln_labels(issues, status):
     if status == "timeout":
         return "TIMEOUT", "TIMEOUT"
+    if status != "ok":
+        return "ERROR", "ERROR"
     if not issues:
         return "SAFE", "SAFE"
+
     matched, has_other = set(), False
     for issue in issues:
-        swc    = issue.get("swc_id", "")
+        swc = issue.get("swc_id", "")
         mapped = SWC_TO_LABEL.get(swc)
         if mapped == "OTHER":
             has_other = True
         elif mapped:
             matched.add(mapped)
         else:
-            text  = (issue.get("title", "") + " " + issue.get("description", "")).lower()
+            text = (issue.get("title", "") + " " + issue.get("description", "")).lower()
             found = False
             for kw, lbl in KEYWORD_TO_LABEL.items():
                 if kw in text:
                     matched.add(lbl)
                     found = True
                     break
-            if not found and swc:
+            if not found:
                 has_other = True
+
     if has_other:
         matched.add("OTHER")
     return (";".join(sorted(matched)) if matched else "OTHER"), "VULNERABLE"
 
 
-# ─────────────────────────────────────────────
-# Mythril runner
-# ─────────────────────────────────────────────
-
 def run_mythril(file_path, timeout, myth_cmd):
-    cmd = [myth_cmd, "analyze", str(file_path), "--execution-timeout", str(timeout)]
+    cmd = [myth_cmd, "analyze", str(file_path), "-o", "jsonv2", "--execution-timeout", str(timeout)]
     start = time.time()
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout + 60)
         elapsed = round(time.time() - start, 2)
-        combined = (proc.stdout or "") + "\n" + (proc.stderr or "")
-        issues = parse_text_output(combined)
 
-        # If Mythril printed a Python traceback treat as runtime error
-        if "Traceback" in combined:
-            status = "runtime_error"
-        # If we parsed issues consider it a successful analysis
-        elif issues:
+        stdout = proc.stdout or ""
+        stderr = proc.stderr or ""
+        parsed = parse_mythril_json_output(stdout)
+        issues = parsed["issues"]
+        logs = parsed["logs"]
+        parse_error = parsed["parse_error"]
+
+        has_traceback = ("Traceback" in stderr) or ("Traceback" in stdout)
+
+        if parse_error is None:
             status = "ok"
-        # Otherwise fall back to exit code
+        elif has_traceback:
+            status = "error"
         else:
-            status = "ok" if proc.returncode == 0 else "error"
+            status = "invalid_json" if proc.returncode == 0 else "error"
 
         return {
             "file": str(file_path),
@@ -197,50 +238,50 @@ def run_mythril(file_path, timeout, myth_cmd):
             "returncode": proc.returncode,
             "status": status,
             "issues": issues,
-            "stdout": proc.stdout[:4000],
-            "stderr": proc.stderr[:2000],
+            "logs": logs,
+            "parse_error": parse_error,
+            "stdout": stdout[:4000],
+            "stderr": stderr[:2000],
         }
 
     except subprocess.TimeoutExpired as e:
         elapsed = round(time.time() - start, 2)
-        out = (e.stdout or "") + "\n" + (e.stderr or "")
+        stdout = e.stdout if isinstance(e.stdout, str) else ""
+        stderr = e.stderr if isinstance(e.stderr, str) else ""
+        parsed = parse_mythril_json_output(stdout)
         return {
             "file": str(file_path),
             "seconds": elapsed,
             "returncode": None,
             "status": "timeout",
-            "issues": parse_text_output(out),
-            "stdout": (e.stdout or "")[:4000],
-            "stderr": (e.stderr or "")[:2000],
+            "issues": parsed["issues"],
+            "logs": parsed["logs"],
+            "parse_error": parsed["parse_error"],
+            "stdout": stdout[:4000],
+            "stderr": stderr[:2000],
         }
 
-
-# ─────────────────────────────────────────────
-# Progress & formatting helpers
-# ─────────────────────────────────────────────
 
 def format_duration(seconds):
     seconds = int(round(seconds))
     m, s = divmod(seconds, 60)
     h, m = divmod(m, 60)
-    if h: return f"{h}h {m}m {s}s"
-    if m: return f"{m}m {s}s"
+    if h:
+        return f"{h}h {m}m {s}s"
+    if m:
+        return f"{m}m {s}s"
     return f"{s}s"
 
 
 def render_progress(done, total, start_time, active_files):
-    pct    = (done / total) * 100 if total else 0
+    pct = (done / total) * 100 if total else 0
     elapsed = time.time() - start_time
     filled = int((done / total) * 24) if total else 0
-    bar    = "#" * filled + "-" * (24 - filled)
+    bar = "#" * filled + "-" * (24 - filled)
     active = ", ".join(active_files) if active_files else "-"
     return (f"[{bar}] {done}/{total} ({pct:5.1f}%) | "
             f"elapsed: {format_duration(elapsed)} | running: {active}")
 
-
-# ─────────────────────────────────────────────
-# Per-file analysis (runs in a thread)
-# ─────────────────────────────────────────────
 
 def analyze_file(label, path, timeout, myth_cmd,
                  done_counter, total, start_time, active_set, active_lock):
@@ -252,8 +293,8 @@ def analyze_file(label, path, timeout, myth_cmd,
         with active_lock:
             print(render_progress(done_counter[0], total, start_time, sorted(active_set)))
 
-    result  = run_mythril(path, timeout, myth_cmd)
-    issues  = result["issues"]
+    result = run_mythril(path, timeout, myth_cmd)
+    issues = result["issues"]
     vuln_class, detection_status = issues_to_vuln_labels(issues, result["status"])
     swc_ids = sorted(set(i.get("swc_id", "") for i in issues if i.get("swc_id")))
 
@@ -270,26 +311,22 @@ def analyze_file(label, path, timeout, myth_cmd,
 
     return {
         "true_label": label,
-        "file":       str(path),
-        "result":     result,
-        "issues":     issues,
+        "file": str(path),
+        "result": result,
+        "issues": issues,
         "row": {
-            "true_label":           label,
-            "file":                 path.name,
-            "path":                 str(path),
+            "true_label": label,
+            "file": path.name,
+            "path": str(path),
             "predicted_vuln_class": vuln_class,
-            "detection_status":     detection_status,
-            "raw_swc_ids":          ";".join(swc_ids),
-            "issue_count":          len(issues),
-            "myth_status":          result["status"],
-            "seconds":              result["seconds"],
+            "detection_status": detection_status,
+            "raw_swc_ids": ";".join(swc_ids),
+            "issue_count": len(issues),
+            "myth_status": result["status"],
+            "seconds": result["seconds"],
         }
     }
 
-
-# ─────────────────────────────────────────────
-# Output helpers
-# ─────────────────────────────────────────────
 
 def write_outputs(runs, rows, outdir):
     outdir.mkdir(parents=True, exist_ok=True)
@@ -300,7 +337,8 @@ def write_outputs(runs, rows, outdir):
     with open(outdir / "picked_files.csv", "w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=[
             "true_label", "file", "path", "predicted_vuln_class",
-            "detection_status", "raw_swc_ids", "issue_count", "myth_status", "seconds"])
+            "detection_status", "raw_swc_ids", "issue_count", "myth_status", "seconds"
+        ])
         w.writeheader()
         w.writerows(rows)
 
@@ -312,14 +350,10 @@ def write_outputs(runs, rows, outdir):
                         r["detection_status"], r["file"], r["seconds"]])
 
     print(f"Results written to: {outdir}/")
-    print(f"  - picked_files.json")
-    print(f"  - picked_files.csv")
-    print(f"  - eval_input.csv")
+    print("  - picked_files.json")
+    print("  - picked_files.csv")
+    print("  - eval_input.csv")
 
-
-# ─────────────────────────────────────────────
-# Statistics computation
-# ─────────────────────────────────────────────
 
 def compute_statistics(outdir):
     outdir = Path(outdir)
@@ -370,23 +404,12 @@ def compute_statistics(outdir):
 
     binary_cm = confusion_matrix(data["true_binary"], data["pred_binary"], labels=binary_labels)
     pd.DataFrame(binary_cm, index=binary_labels, columns=binary_labels).to_csv(
-        stats_dir / "binary_confusion_matrix.csv")
-
-    vuln_map = {
-        "BN": "block_number_dependency",
-        "DE": "dangerous_delegatecall",
-        "EF": "ether_frozen",
-        "SE": "ether_strict_equality",
-        "OF": "integer_overflow",
-        "RE": "reentrancy",
-        "TP": "timestamp_dependency",
-        "UC": "unchecked_external_call",
-    }
+        stats_dir / "binary_confusion_matrix.csv"
+    )
 
     rows = []
     for label in LABELS:
         subset = data[data["true_label"].isin([label, "SAFE"])].copy()
-
         if len(subset) == 0:
             continue
 
@@ -437,6 +460,7 @@ def compute_statistics(outdir):
     mc_prec, mc_rec, mc_f1, mc_sup = precision_recall_fscore_support(
         data["true_label"], data["pred_strict_multiclass"], labels=multiclass_labels, zero_division=0
     )
+
     multiclass_metrics = pd.DataFrame({
         "label": multiclass_labels,
         "precision": mc_prec,
@@ -463,10 +487,6 @@ def compute_statistics(outdir):
     return True
 
 
-# ─────────────────────────────────────────────
-# Output directory naming
-# ─────────────────────────────────────────────
-
 def build_outdir(base, mode, n, batch_start, batch_end, seed):
     if mode == "range":
         suffix = f"range_{batch_start}_{batch_end}"
@@ -476,10 +496,6 @@ def build_outdir(base, mode, n, batch_start, batch_end, seed):
         suffix = f"random_{n}" + (f"_seed{seed}" if seed is not None else "")
     return Path(base) / suffix
 
-
-# ─────────────────────────────────────────────
-# Main
-# ─────────────────────────────────────────────
 
 def main():
     ap = argparse.ArgumentParser(
@@ -508,24 +524,24 @@ Output folders are named automatically:
   results/smallest_100/
 """)
 
-    ap.add_argument("root",      help="Root folder containing BN, DE, EF, SE, OF, RE, TP, UC sub-folders")
-    ap.add_argument("--mode",    choices=["random", "smallest", "range"], default="random",
+    ap.add_argument("root", help="Root folder containing BN, DE, EF, SE, OF, RE, TP, UC sub-folders")
+    ap.add_argument("--mode", choices=["random", "smallest", "range"], default="random",
                     help="File selection mode (default: random)")
-    ap.add_argument("--n",       type=int, default=None,
+    ap.add_argument("--n", type=int, default=None,
                     help="Files per folder — required for random/smallest")
-    ap.add_argument("--start",   type=int, default=None,
+    ap.add_argument("--start", type=int, default=None,
                     help="1-based start index per folder — required for range")
-    ap.add_argument("--end",     type=int, default=None,
+    ap.add_argument("--end", type=int, default=None,
                     help="1-based end index per folder, inclusive — required for range")
     ap.add_argument("--timeout", type=int, default=120,
                     help="Mythril timeout per file in seconds (default: 120)")
     ap.add_argument("--workers", type=int, default=2,
                     help="Parallel Mythril processes (default: 2)")
-    ap.add_argument("--myth",    default="myth",
+    ap.add_argument("--myth", default="myth",
                     help="Mythril executable name or full path (default: myth)")
-    ap.add_argument("--outdir",  default="results",
+    ap.add_argument("--outdir", default="results",
                     help="Base output directory (default: results)")
-    ap.add_argument("--seed",    type=int, default=None,
+    ap.add_argument("--seed", type=int, default=None,
                     help="Random seed — mode=random only")
     args = ap.parse_args()
 
@@ -553,7 +569,7 @@ Output folders are named automatically:
         print("No files selected — nothing to do.", file=sys.stderr)
         sys.exit(2)
 
-    total     = len(picked)
+    total = len(picked)
     per_label = {}
     for label, f in picked:
         per_label.setdefault(label, []).append(f.name)
@@ -563,15 +579,15 @@ Output folders are named automatically:
     print(f"\n{sel_info} | {total} files total | workers={args.workers} | output → {outdir}")
     for label, names in sorted(per_label.items()):
         preview = ", ".join(names[:5])
-        extra   = f" ... +{len(names)-5} more" if len(names) > 5 else ""
+        extra = f" ... +{len(names)-5} more" if len(names) > 5 else ""
         print(f"  [{label}] {len(names)} file(s): {preview}{extra}")
     print()
 
-    start_all    = time.time()
+    start_all = time.time()
     done_counter = [0]
-    active_set   = set()
-    active_lock  = threading.Lock()
-    result_map   = {}
+    active_set = set()
+    active_lock = threading.Lock()
+    result_map = {}
 
     with ThreadPoolExecutor(max_workers=args.workers) as executor:
         futures = {
@@ -596,8 +612,12 @@ Output folders are named automatically:
     for i in range(len(picked)):
         res = result_map.get(i)
         if res:
-            runs.append({"true_label": res["true_label"], "file": res["file"],
-                         "result": res["result"], "issues": res["issues"]})
+            runs.append({
+                "true_label": res["true_label"],
+                "file": res["file"],
+                "result": res["result"],
+                "issues": res["issues"],
+            })
             rows.append(res["row"])
 
     elapsed_total = round(time.time() - start_all, 2)

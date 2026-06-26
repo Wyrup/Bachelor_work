@@ -14,7 +14,8 @@ from pathlib import Path
 import pandas as pd
 from sklearn.metrics import accuracy_score, precision_recall_fscore_support, confusion_matrix
 
-LABELS = ["BN", "DE", "EF", "SE", "OF", "RE", "TP", "UC"]
+LABELS = ["SAFE", "BN", "DE", "EF", "SE", "OF", "RE", "TP", "UC"]
+UNSAFE_LABELS = [label for label in LABELS if label != "SAFE"]
 
 SWC_TO_LABEL = {
     "SWC-116": "BN", "SWC-120": "BN",
@@ -408,12 +409,15 @@ def compute_statistics(outdir):
     )
 
     rows = []
-    for label in LABELS:
+    for label in UNSAFE_LABELS:
         subset = data[data["true_label"].isin([label, "SAFE"])].copy()
+
         if len(subset) == 0:
             continue
 
-        subset["true_onevsrest"] = subset["true_label"].apply(lambda x: label if x == label else "NOT_" + label)
+        subset["true_onevsrest"] = subset["true_label"].apply(
+            lambda x: label if x == label else "NOT_" + label
+        )
 
         def pred_onevsrest(pred_class):
             if not isinstance(pred_class, str):
@@ -447,7 +451,10 @@ def compute_statistics(outdir):
     def pred_strict_multiclass(pred_class):
         if not isinstance(pred_class, str):
             return "SAFE"
-        pred_labels = set(p.strip() for p in pred_class.split(";") if p.strip() and p.strip() in LABELS)
+        pred_labels = set(
+            p.strip() for p in pred_class.split(";")
+            if p.strip() and p.strip() in UNSAFE_LABELS
+        )
         if len(pred_labels) == 0:
             return "SAFE"
         if len(pred_labels) == 1:
@@ -458,7 +465,8 @@ def compute_statistics(outdir):
     multiclass_labels = ["SAFE", "BN", "DE", "EF", "OF", "RE", "SE", "TP", "UC", "MULTI"]
 
     mc_prec, mc_rec, mc_f1, mc_sup = precision_recall_fscore_support(
-        data["true_label"], data["pred_strict_multiclass"], labels=multiclass_labels, zero_division=0
+        data["true_label"], data["pred_strict_multiclass"],
+        labels=multiclass_labels, zero_division=0
     )
 
     multiclass_metrics = pd.DataFrame({
@@ -473,7 +481,9 @@ def compute_statistics(outdir):
     mc_acc = accuracy_score(data["true_label"], data["pred_strict_multiclass"])
     pd.DataFrame([{
         "accuracy": mc_acc,
-        "macro_f1_excluding_multi": multiclass_metrics[multiclass_metrics["label"] != "MULTI"]["f1"].mean(),
+        "macro_f1_excluding_multi": multiclass_metrics[
+            multiclass_metrics["label"] != "MULTI"
+        ]["f1"].mean(),
         "n_rows": len(data)
     }]).to_csv(stats_dir / "strict_multiclass_summary.csv", index=False)
 
@@ -499,54 +509,90 @@ def build_outdir(base, mode, n, batch_start, batch_end, seed):
 
 def main():
     ap = argparse.ArgumentParser(
-        description="Pick Solidity files per vulnerability folder, run Mythril in parallel, export results",
+        description="Pick Solidity files per label folder, run Mythril in parallel, export results",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Modes
 ─────
-  random   : randomly pick --n files per folder (reproducible with --seed)
-  smallest : pick the --n files with the lowest numeric filename per folder
-  range    : pick files at positions --start to --end (1-based) per folder,
-             sorted numerically by filename
+random   : randomly pick --n files per folder (reproducible with --seed)
+smallest : pick the --n files with the lowest numeric filename per folder
+range    : pick files at positions --start to --end (1-based) per folder,
+           sorted numerically by filename
 
 Examples
 ────────
-  python3 select_run.py /data/vuln-root --mode random   --n 3  --seed 42 --workers 3
-  python3 select_run.py /data/vuln-root --mode smallest --n 100           --workers 4
-  python3 select_run.py /data/vuln-root --mode range --start   1 --end 100 --workers 4
-  python3 select_run.py /data/vuln-root --mode range --start 101 --end 200 --workers 4
-  python3 select_run.py /data/vuln-root --mode range --start 201 --end 300 --workers 4
+python3 select_run.py /data/vuln-root --mode random --n 3 --seed 42 --workers 3
+python3 select_run.py /data/vuln-root --mode smallest --n 100 --workers 4
+python3 select_run.py /data/vuln-root --mode range --start 1 --end 100 --workers 4
+python3 select_run.py /data/vuln-root --mode range --start 101 --end 200 --workers 4
+python3 select_run.py /data/vuln-root --mode range --start 201 --end 300 --workers 4
+
+Expected root structure
+───────────────────────
+root/
+├── SAFE/
+├── BN/
+├── DE/
+├── EF/
+├── SE/
+├── OF/
+├── RE/
+├── TP/
+└── UC/
 
 Output folders are named automatically:
-  results/range_1_100/
-  results/range_101_200/
-  results/random_3_seed42/
-  results/smallest_100/
-""")
+results/range_1_100/
+results/range_101_200/
+results/random_3_seed42/
+results/smallest_100/
+"""
+    )
 
-    ap.add_argument("root", help="Root folder containing BN, DE, EF, SE, OF, RE, TP, UC sub-folders")
-    ap.add_argument("--mode", choices=["random", "smallest", "range"], default="random",
-                    help="File selection mode (default: random)")
-    ap.add_argument("--n", type=int, default=None,
-                    help="Files per folder — required for random/smallest")
-    ap.add_argument("--start", type=int, default=None,
-                    help="1-based start index per folder — required for range")
-    ap.add_argument("--end", type=int, default=None,
-                    help="1-based end index per folder, inclusive — required for range")
-    ap.add_argument("--timeout", type=int, default=120,
-                    help="Mythril timeout per file in seconds (default: 120)")
-    ap.add_argument("--workers", type=int, default=2,
-                    help="Parallel Mythril processes (default: 2)")
-    ap.add_argument("--myth", default="myth",
-                    help="Mythril executable name or full path (default: myth)")
-    ap.add_argument("--outdir", default="results",
-                    help="Base output directory (default: results)")
-    ap.add_argument("--seed", type=int, default=None,
-                    help="Random seed — mode=random only")
+    ap.add_argument(
+        "root",
+        help="Root folder containing SAFE, BN, DE, EF, SE, OF, RE, TP, UC sub-folders"
+    )
+    ap.add_argument(
+        "--mode", choices=["random", "smallest", "range"], default="random",
+        help="File selection mode (default: random)"
+    )
+    ap.add_argument(
+        "--n", type=int, default=None,
+        help="Files per folder — required for random/smallest"
+    )
+    ap.add_argument(
+        "--start", type=int, default=None,
+        help="1-based start index per folder — required for range"
+    )
+    ap.add_argument(
+        "--end", type=int, default=None,
+        help="1-based end index per folder, inclusive — required for range"
+    )
+    ap.add_argument(
+        "--timeout", type=int, default=120,
+        help="Mythril timeout per file in seconds (default: 120)"
+    )
+    ap.add_argument(
+        "--workers", type=int, default=2,
+        help="Parallel Mythril processes (default: 2)"
+    )
+    ap.add_argument(
+        "--myth", default="myth",
+        help="Mythril executable name or full path (default: myth)"
+    )
+    ap.add_argument(
+        "--outdir", default="results",
+        help="Base output directory (default: results)"
+    )
+    ap.add_argument(
+        "--seed", type=int, default=None,
+        help="Random seed — mode=random only"
+    )
     args = ap.parse_args()
 
     if args.mode in {"random", "smallest"} and args.n is None:
         ap.error("--n is required when --mode is random or smallest")
+
     if args.mode == "range":
         if args.start is None or args.end is None:
             ap.error("--start and --end are required when --mode is range")
@@ -559,12 +605,16 @@ Output folders are named automatically:
     outdir = build_outdir(args.outdir, args.mode, args.n, args.start, args.end, args.seed)
 
     picked, missing = choose_files(
-        args.root, n=args.n, mode=args.mode,
-        batch_start=args.start, batch_end=args.end,
+        args.root,
+        n=args.n,
+        mode=args.mode,
+        batch_start=args.start,
+        batch_end=args.end,
     )
 
     if missing:
         print(f"[warn] Missing or empty folders: {', '.join(missing)}", file=sys.stderr)
+
     if not picked:
         print("No files selected — nothing to do.", file=sys.stderr)
         sys.exit(2)
@@ -574,8 +624,12 @@ Output folders are named automatically:
     for label, f in picked:
         per_label.setdefault(label, []).append(f.name)
 
-    sel_info = (f"Mode=range ({args.start}–{args.end})" if args.mode == "range"
-                else f"Mode={args.mode} | n={args.n}")
+    sel_info = (
+        f"Mode=range ({args.start}–{args.end})"
+        if args.mode == "range"
+        else f"Mode={args.mode} | n={args.n}"
+    )
+
     print(f"\n{sel_info} | {total} files total | workers={args.workers} | output → {outdir}")
     for label, names in sorted(per_label.items()):
         preview = ", ".join(names[:5])
@@ -598,6 +652,7 @@ Output folders are named automatically:
             ): i
             for i, (label, path) in enumerate(picked)
         }
+
         for future in as_completed(futures):
             idx = futures[future]
             try:
@@ -634,7 +689,7 @@ Output folders are named automatically:
         if compute_statistics(outdir):
             print("✅ Statistics generated successfully!")
         else:
-            print("⚠️  Unable to generate statistics (no valid data)")
+            print("⚠️ Unable to generate statistics (no valid data)")
     except Exception as e:
         print(f"❌ Error generating statistics: {e}")
 

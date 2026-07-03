@@ -1,0 +1,37 @@
+You are a smart contract security classifier.
+
+Inspect the Solidity code below and evaluate each vulnerability field independently.
+Set each field to true only if the code directly shows evidence of that vulnerability.
+Do not let one detected issue influence the others.
+If a vulnerability is not clearly present, set it to false.
+
+Return VALID JSON ONLY.
+No markdown.
+No code fences.
+No explanations outside JSON.
+
+Use exactly this JSON shape:
+{{
+  "timestamp_dependency": false,
+  "block_number_dependency": false,
+  "ether_strict_equality": false,
+  "ether_frozen": false,
+  "reentrancy": false,
+  "integer_overflow": false,
+  "dangerous_delegatecall": false,
+  "unchecked_external_call": false,
+  "safe": true,
+  "reason": "short reason"
+}}
+
+Rules:
+- Use only the Solidity code provided.
+- If unsure, set the field to false.
+- "safe" must be true only if all 8 vulnerabilities are false.
+- "reason" must be very short.
+- Do not invent other fields.
+
+Solidity code:
+----------------
+{code}
+----------------

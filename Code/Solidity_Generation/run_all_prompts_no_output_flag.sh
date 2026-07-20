@@ -7,6 +7,7 @@ COMPILE="$BASE_DIR/analysis/compile/compile_results.csv"
 MYTHRIL="$BASE_DIR/analysis/mythril/mythril_results.csv"
 MODEL="qwen2.5-coder:7b"
 PROMPTS=(balanced evidence oneVuln precision)
+DEFAULT_LLM_CSV="$BASE_DIR/analysis/llm/ollama_results_qwen2.5-coder-7b.csv"
 
 for PROMPT_NAME in "${PROMPTS[@]}"; do
   PROMPT_FILE="prompts/${PROMPT_NAME}.txt"
@@ -24,8 +25,15 @@ for PROMPT_NAME in "${PROMPTS[@]}"; do
     "$COMPILE" \
     --only-compilable \
     --prompt "$PROMPT_FILE" \
-    --model "$MODEL" \
-    --output "$OLLAMA_CSV"
+    --model "$MODEL"
+
+  if [[ ! -f "$DEFAULT_LLM_CSV" ]]; then
+    echo "Expected output file not found: $DEFAULT_LLM_CSV"
+    echo "Check where ollama_batch_from_manifest.py writes its CSV."
+    exit 1
+  fi
+
+  cp "$DEFAULT_LLM_CSV" "$OLLAMA_CSV"
 
   python3 Code/Solidity_Generation/merge_results.py \
     "$MANIFEST" \

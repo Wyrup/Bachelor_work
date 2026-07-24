@@ -10,6 +10,7 @@ import requests
 OLLAMA_URL = "http://localhost:11434/api/chat"
 DEFAULT_MODEL = "qwen2.5-coder:7b"
 DEFAULT_OUTPUT = "ollama_outputs/ollama_batch_results.csv"
+UNSAFE_LABELS = {"BN", "DE", "EF", "SE", "OF", "RE", "TP", "UC"}
 
 
 def load_prompt_template(prompt_path: str = None):
@@ -27,15 +28,21 @@ def load_prompt_template(prompt_path: str = None):
 
 
 def get_true_label(file_path: Path) -> str:
-    parts = file_path.parts
+    parts = [part.upper() for part in file_path.parts]
 
     if "SAFE" in parts:
         return "SAFE"
 
+    for part in parts:
+        if part in UNSAFE_LABELS:
+            return part
+
     if "UNSAFE" in parts:
         idx = parts.index("UNSAFE")
         if idx + 1 < len(parts):
-            return parts[idx + 1]
+            label = parts[idx + 1].upper()
+            if label in UNSAFE_LABELS:
+                return label
 
     return "UNKNOWN"
 

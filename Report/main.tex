@@ -1,0 +1,635 @@
+\documentclass[a4paper,11pt]{article}\usepackage{graphicx} % Required for inserting images
+\usepackage{url}
+\usepackage[T1]{fontenc}
+\usepackage{biblatex}
+\usepackage{listings}
+\usepackage{booktabs}
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{comment}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{float}
+\usepackage{placeins}
+\lstset{
+  basicstyle=\ttfamily\small,
+  keywordstyle=\color{blue},
+  commentstyle=\color{gray},
+  stringstyle=\color{orange},
+  showstringspaces=false,
+  numberstyle=\tiny\color{gray},
+  numbers=left,
+  stepnumber=1,
+  frame=single,
+  breaklines=true,
+  captionpos=b
+}
+\addbibresource{references.bib}
+
+\title{Benchmarking LLMs for Smart-Contract Vulnerability Detection}
+\author{Tim Gouvernon}
+\date{}
+
+\usepackage{fancyhdr}
+\setlength{\headheight}{15pt}
+\pagestyle{fancy}
+\fancyhead{}
+\fancyhead[L]{SS 2026}
+\fancyhead[R]{Tim Gouvernon}
+
+\begin{document}
+\begin{titlepage}
+\begin{center}
+
+{{\Large\textsc{Université de Neuchâtel}}}
+
+\rule[0.1cm]{15.8cm}{0.1mm}
+\rule[0.5cm]{15.8cm}{0.6mm}
+
+\vspace{10mm}
+
+{\Huge\bfseries Benchmarking LLMs for Smart-Contract Vulnerability Detection}
+
+\vspace{5mm}
+
+{\Large\bfseries Bachelor Thesis}
+
+\vspace{30mm}
+
+{\Large\bfseries by}
+
+\vspace{15mm}
+
+{\Large\bfseries Tim Gouvernon}
+
+\vspace{5mm}
+
+{\large tim.gouvernon@unine.ch}
+
+\vspace{5mm}
+
+{\large MATR: 23506348}
+
+\vspace{15mm}
+
+\vspace{5mm}
+
+{\Large Supervised by :}
+
+\vspace{5mm}
+
+{\Large Prof. Valerio Schiavoni, Ph.D}
+
+\vspace{50mm}
+
+{\Large Bachelor of Science in Data Science}
+
+\vspace{5mm}
+
+{\large Institut d'informatique}
+
+\vspace{5mm}
+
+{\Large\bfseries August 2026}
+
+\end{center}
+\end{titlepage}
+
+\newpage
+\tableofcontents
+\newpage
+\begin{comment}
+    
+
+\section*{Plan*}
+
+\subsection*{Vulnerability Types}
+In this work, I focus on the following smart contract vulnerabilities:
+\begin{itemize}
+    \item Reentrancy
+    \item Integer overflow/underflow
+    \item Access control issues
+    \item Race conditions / transaction order dependency / front‑running
+    \item Unchecked return values
+    \item Denial of service
+\end{itemize}
+These vulnerability types are described, among others, in \cite{dreamlab_smarts_2022}.
+
+\subsection*{Solidity Version}
+For all experiments I will use Solidity 0.8.x.
+
+\subsection*{Baseline Tool}
+I will use Mythril \cite{noauthor_consensysdiligencemythril_2026} as a static analysis baseline to compare against the LLMs.
+
+\subsection*{LLMs}
+All LLMs will be run locally via Ollama \cite{noauthor_ollama_nodate}.
+
+Security‑tuned models:
+\begin{itemize}
+    \item qwen2.5-auditor
+    \item gpt-oss-safeguard
+\end{itemize}
+
+Code‑focused models:
+\begin{itemize}
+    \item qwen2.5-coder
+    \item deepseek-coder-v2
+    \item codellama
+    \item starcoder2
+\end{itemize}
+
+General‑purpose models:
+\begin{itemize}
+    \item llama3.3
+    \item mistral
+    \item gpt-oss
+\end{itemize}
+
+\subsection*{Metrics used}
+\begin{itemize}
+    \item Precision
+    \item Recall 
+    \item F1-score
+    \item False positive rate
+    \item False negative rate
+    \item Macro-f1
+    \item Accuracy
+    \item Average detection time
+    \item Token / Ressource usage
+\end{itemize}
+
+\section{Plan}
+In this work, I focus on a selected set of common smart contract vulnerabilities: reentrancy, integer overflow and underflow, access control issues, race conditions / transaction order dependency / front‑running, unchecked return values, and denial of service. These vulnerability types are described, among others, in prior security overviews of smart contracts. For all experiments, I will use Solidity 0.8.x to ensure consistent semantics, especially regarding built‑in arithmetic overflow checks. I will construct a labeled dataset of Solidity snippets (vulnerable and safe) from public sources and known vulnerable-contract collections, and for each snippet I will annotate the presence or absence of each of the selected vulnerability types so that I can compute per‑type metrics.
+
+As a baseline static analysis tool, I will use Mythril and compare its detections with several large language models executed locally via Ollama. The LLMs are grouped into three categories: security‑tuned models (such as qwen2.5‑auditor and gpt‑oss‑safeguard), code‑focused models (such as qwen2.5‑coder, deepseek‑coder‑v2, codellama, and starcoder2), and general‑purpose models (such as llama3.3, mistral, and gpt‑oss). For each tool and model, I will use a fixed prompting and decoding configuration and a structured output format that allows automatic extraction of predicted vulnerability labels. I will then evaluate each method using standard classification metrics precision, recall, F1‑score, false positive rate, false negative rate, macro‑F1, and accuracy as well as practical measures such as average detection time per snippet and approximate token/resource usage, reporting both per‑vulnerability‑type results and overall performance.
+\end{comment}
+
+\section{Introduction}
+
+Smart contracts are programs deployed on blockchain networks that execute automatically when predefined conditions are met. Because they are stored and executed on distributed ledgers, smart contracts play a central role in decentralized applications, often referred to as Dapps. Among the most widely used languages for developing smart contracts is Solidity, the primary language of the Ethereum ecosystem. While smart contracts enable transparent and automated execution, they also introduce serious security risks: once deployed, vulnerabilities can be difficult or impossible to patch, and failures may lead to financial losses or unintended behavior including security failures.
+
+Security analysis of smart contracts is therefore an important research area. Common vulnerability types include reentrancy, integer overflow and underflow, access-control issues, unchecked external calls, and timestamp or block-number dependency. Traditional static-analysis tools, such as Mythril, can detect many of these issues by analyzing code structure and execution paths. However, recent progress in large language models (LLMs) has raised the question of whether these models can also identify vulnerabilities in smart contracts, especially when guided by carefully designed prompts.
+
+This thesis investigates how well different LLMs can detect known vulnerabilities in Solidity smart contracts and compares their performance with static-analysis tools. The study focuses on a set of well-known vulnerability classes and evaluates whether LLMs can recognize them reliably in both vulnerable and safe examples. In addition to measuring detection quality, the thesis examines how prompt design affects model behavior and whether structured prompting can improve the usefulness of LLM outputs for security analysis.
+
+The work is based on a labeled dataset of Solidity snippets collected from public sources and manually curated examples. The dataset contains both vulnerable and safe contracts, with labels indicating the corresponding bug type. Several LLMs are tested under different prompt formulations, and their outputs are compared against those of Mythril. To quantify performance, the thesis uses standard machine-learning metrics such as precision, recall, and F1 score for each vulnerability class. This makes it possible to assess not only whether a model can detect vulnerabilities in general, but also which specific bug types are easier or harder for it to identify.
+
+The main research question of this thesis is:
+
+\begin{quote}
+How effectively do large language models identify known Solidity smart contract vulnerabilities compared to the static analysis tool Mythril?
+\end{quote}
+
+To answer this question, the thesis addresses the following sub-questions:
+\begin{itemize}
+    \item Which vulnerability types can LLMs identify most reliably?
+    \item How does prompt engineering influence detection performance?
+    \item How do the results compare with a static-analysis baseline such as Mythril?
+    \item Can LLMs provide useful vulnerability screening for smart-contract security analysis?
+\end{itemize}
+
+The expected contribution of this thesis is a practical evaluation of LLMs in the context of smart-contract vulnerability detection. Beyond measuring performance, the project aims to clarify whether LLMs can complement existing security tools or whether their current use remains limited to exploratory analysis. By comparing multiple models and prompting strategies, the thesis provides insight into the strengths and weaknesses of LLM-based code analysis for blockchain applications.
+
+\section{Background and Related Work}
+
+\subsection{Smart Contracts and Security Risks}
+
+Smart contracts are self-executing programs deployed on blockchain networks, where they govern transactions and application logic without relying on a central authority. In the Ethereum ecosystem, Solidity is the dominant language for developing smart contracts. While this model offers transparency and automation, it also creates a high-security burden: once deployed, contracts are difficult to modify, and implementation mistakes may lead to irreversible financial loss or broken application logic.
+
+Smart contracts are particularly vulnerable to bugs caused by external interactions, implicit assumptions about transaction ordering, or misuse of blockchain-specific variables. Common vulnerability classes include reentrancy, integer overflow and underflow, access-control weaknesses, unchecked external calls, and dependency on timestamp or block-number values. Because these vulnerabilities are often subtle and context-dependent, detecting them reliably remains a difficult problem in software security.
+
+\subsection{Traditional Static Analysis}
+
+Before the use of language models, smart-contract auditing was dominated by static-analysis tools. Systems such as Mythril, Slither, and related analyzers were designed to inspect Solidity code automatically and detect known vulnerability patterns. These tools provide an important baseline because they are deterministic, widely used, and tailored to the structure of smart-contract programs.
+
+Static-analysis approaches, however, also have limitations. They may produce false positives, miss vulnerabilities that depend on more complex execution paths, and require manual interpretation by auditors. In practice, this means that static-analysis tools are useful but not sufficient on their own. This motivates the exploration of complementary methods, especially approaches that can reason more flexibly about code semantics and programming intent.
+
+\subsection{Machine Learning for Vulnerability Detection}
+
+Recent work has explored whether machine learning can improve smart-contract vulnerability detection by learning patterns directly from code. Compared with rule-based systems, learned models can potentially generalize beyond explicitly encoded vulnerability signatures. However, they depend heavily on the quality and size of the labeled dataset.
+
+Yang et al.\ proposed one of the earlier LLM-based approaches for this task by fine-tuning Llama-2 and CodeLlama on labeled Solidity functions extracted from audit reports \cite{yang_automated_2023}. Their study showed that fine-tuned models can achieve useful precision on unseen data, although recall remained limited. In particular, their best-performing model reached a precision of 31--36\% in predicting vulnerability categories on unseen functions \cite{yang_automated_2023}. This indicates that LLMs can learn some vulnerability-related signals, but that their performance still falls short of robust auditing standards.
+
+\subsection{LLMs in Smart-Contract Auditing}
+
+More recent studies suggest that the prompting and adaptation strategy strongly influences model performance. Zaazaa and El Bakkali introduced \emph{SmartLLMSentry}, a framework that uses ChatGPT with in-context training for smart-contract vulnerability detection \cite{zaazaa_smartllmsentry_2024}. Their results indicate that when enough training examples are provided, LLMs can generate useful vulnerability rules and achieve high exact-match performance in a constrained setting. The study also highlights an important point for this thesis: LLMs are not just passive classifiers, but can act as reasoning systems whose outputs depend heavily on the task formulation.
+
+Other recent research continues this direction by evaluating generative or instruction-tuned LLMs on Solidity vulnerability detection tasks \cite{kevin_smartllm_2025,ince_generative_2025,noauthor_logic_nodate}. These studies generally report that LLMs can identify some classes of vulnerabilities reasonably well, but that performance varies substantially by model, prompt, and label set. In addition, several papers emphasize that security-focused tasks require structured prompts and well-defined evaluation protocols, because free-form text responses are difficult to score consistently \cite{kevin_smartllm_2025,ince_generative_2025}.
+
+\subsection{Prompt Engineering and Evaluation}
+
+Prompt engineering plays a central role in code analysis with LLMs. A model that performs poorly with a vague prompt may behave much better when the output format is constrained and the task is stated precisely. In smart-contract auditing, structured prompts are especially useful because they allow the output to be converted into machine-readable labels and evaluated with standard metrics such as precision, recall, and F1 score.
+
+This is consistent with the design used in the studies above, where the model is asked to classify vulnerabilities or produce structured reasoning rather than generate unconstrained prose \cite{yang_automated_2023,zaazaa_smartllmsentry_2024,kevin_smartllm_2025}. Such a setup is well suited to a comparative thesis, because it makes it possible to evaluate different models under the same conditions. It also reduces ambiguity during post-processing, which is important when working with large batches of Solidity snippets.
+
+\subsection{Position of This Thesis}
+
+The current literature shows that LLMs are becoming a promising but still immature tool for smart-contract security analysis \cite{yang_automated_2023,zaazaa_smartllmsentry_2024,kevin_smartllm_2025,ince_generative_2025,noauthor_logic_nodate}. Fine-tuned models can achieve useful precision, and prompt-based systems can help uncover security patterns, but neither approach yet matches the reliability of mature auditing tools in all settings. At the same time, static-analysis tools remain limited in their ability to capture deeper semantic or context-dependent issues.
+
+This thesis builds on that gap by comparing several LLMs with a static-analysis baseline, Mythril, on a labeled Solidity dataset. The goal is to assess which vulnerability types are most detectable, how prompt design affects performance, and whether LLMs can serve as a useful screening layer in smart-contract auditing. In this sense, the thesis contributes to the emerging literature on hybrid security analysis, where traditional analyzers and language models are evaluated side by side rather than treated as competing replacements.
+
+\section{Methodology}
+
+\subsection{Dataset}
+
+The dataset used in this thesis was drawn from Resource 1 and Resource 3 of the \textit{Messi-Q Smart-Contract-Dataset} repository \cite{qian_messi-qsmart-contract-dataset_2026}. Resource 1 consists of 40{,}000 real-world smart contracts and was used as the source of the \texttt{SAFE} label. Resource 3 contains more than 12{,}000 Ethereum smart contracts, including inherited contracts, and covers eight vulnerability types \cite{zhuang_smart_2020,liu_rethinking_2023}. In total, 8{,}285 contracts were used in the experiments reported in this thesis. The contracts were collected from verified source code on Etherscan, which means that they represent deployed contracts from the Ethereum mainnet rather than synthetic examples. The repository also states that the ground-truth labels were confirmed through a combination of vulnerability-specific patterns and manual inspection.
+
+For this thesis, the dataset served as the benchmark for evaluating large language models on Solidity vulnerability detection. Each contract was treated as an independent sample and assigned a ground-truth label corresponding either to a specific vulnerability class or to the safe category. This made it possible to evaluate the models in three settings: binary classification, one-vs-rest classification, and strict multiclass classification.
+
+The vulnerability classes considered in this work are timestamp dependency, block number dependency, dangerous delegatecall, unchecked external call, reentrancy, integer overflow or underflow, ether strict equality, and ether frozen. These classes correspond to the labels provided by the dataset and form the prediction schema used in the experiments. In addition to the vulnerable categories, the dataset includes safe contracts, which are necessary for assessing whether the models can distinguish vulnerable from non-vulnerable code.
+
+An important advantage of the dataset is that it is derived from real Solidity code rather than synthetic examples. This makes the benchmark more realistic, but also more challenging, because the contracts differ substantially in structure, size, and coding style. As a result, the dataset provides a meaningful test of whether LLMs can generalize across diverse smart-contract patterns instead of relying on simplified toy examples.
+
+In the experiments, the contracts were processed as plain Solidity source files. Each file was analyzed independently, and the model output was parsed into a structured JSON format. The resulting predictions were then compared with the dataset labels using standard evaluation metrics such as accuracy, precision, recall, and F1-score. This setup allowed a direct comparison between the LLMs and the static-analysis baseline.
+
+\subsection{Mythril-based evaluation}
+\label{subsec:mythril_evaluation}
+
+This study uses Mythril as a static-analysis baseline for detecting vulnerabilities in Solidity smart contracts. Mythril is applied to a labeled dataset of Solidity files containing both vulnerable contracts and safe contracts, and the resulting findings are compared against the ground-truth labels defined in the dataset.
+
+\subsubsection{Dataset preparation}
+
+The experimental dataset is organized into class-specific directories under a common root directory. Each subdirectory corresponds to one label in the evaluation schema, namely \texttt{SAFE}, \texttt{BN}, \texttt{DE}, \texttt{EF}, \texttt{SE}, \texttt{OF}, \texttt{RE}, \texttt{TP}, and \texttt{UC}. This directory structure enables deterministic file selection and ensures that each class is processed independently during the analysis phase.
+
+The final evaluation dataset is balanced and contains 8{,}000 Solidity contracts in total, split evenly between 4{,}000 safe contracts and 4{,}000 unsafe contracts. The unsafe portion is distributed across the eight vulnerability categories listed above. This balance is important because it avoids the evaluation bias introduced by class imbalance and allows the performance metrics to reflect the actual detection capability of the tool rather than the prevalence of one class over another.
+
+The labels used in the study are defined as follows:
+\begin{itemize}
+    \item \texttt{SAFE}: contracts that do not exhibit any of the targeted vulnerability types and are expected to produce no relevant Mythril findings.
+    \item \texttt{BN}: \emph{block number dependency}, where contract logic depends on the blockchain block number in a way that may affect correctness or security.
+    \item \texttt{DE}: \emph{dangerous delegatecall}, referring to unsafe use of \texttt{delegatecall} that may allow unintended control flow or storage corruption.
+    \item \texttt{EF}: \emph{ether frozen}, describing situations in which ether can become permanently inaccessible within a contract.
+    \item \texttt{SE}: \emph{ether strict equality}, where contract logic relies on exact equality comparisons involving ether values and may become brittle or unsafe.
+    \item \texttt{OF}: \emph{integer overflow/underflow}, where arithmetic operations exceed the numerical bounds of the underlying integer representation.
+    \item \texttt{RE}: \emph{reentrancy}, where external calls allow repeated entry into a function before the previous execution has completed.
+    \item \texttt{TP}: \emph{timestamp dependency}, where security-relevant behavior depends on \texttt{block.timestamp} or similar time-related blockchain values.
+    \item \texttt{UC}: \emph{unchecked external call}, referring to external calls whose return values are not properly validated.
+\end{itemize}
+
+To support reproducible evaluation, the analysis script selects contracts from these folders using three modes: random sampling, selection of the smallest numeric filenames, and range-based batching. Random sampling is useful for exploratory runs, smallest-file selection supports deterministic subsampling, and range-based batching enables the full dataset to be processed in manageable segments. In the experiments reported here, range-based selection was used so that the evaluation could be executed systematically over the entire dataset while keeping each execution batch computationally tractable.
+
+The use of a class-based folder structure also simplifies traceability. Since each contract is stored under the folder corresponding to its ground-truth label, the script can preserve the original label during analysis and later compare it directly against the label inferred from Mythril output. This makes the evaluation pipeline transparent and reproducible, which is essential for a methodology that combines static analysis with benchmark-based comparison.
+
+\subsubsection{Environment setup}
+
+All experiments were conducted on a remote machine running Ubuntu 24.04 LTS with Python 3.12.3. The environment was prepared by synchronizing the project directory to the machine, creating a dedicated Python virtual environment, and installing the system packages required to compile Mythril dependencies. The software setup included \texttt{python3.12-venv}, \texttt{build-essential}, and \texttt{python3.12-dev}, followed by installation of the project requirements, Mythril, and \texttt{solc-select}. The Solidity compiler was then pinned to version \texttt{0.4.24} so that all analyses were executed under the same compiler configuration.
+
+The experiments were performed on a \texttt{titlis} machine from \textit{IIUN} \cite{noauthor_machines_nodate} equipped with a Supermicro \texttt{X12SPW-TF} mainboard. The machine used a single NUMA node with 32 CPU cores running at 2.9\,GHz, based on an Intel\textregistered\ Xeon\textregistered\ Gold 6326 processor. It was configured with 64\,GiB of memory and 512.11\,GB of local storage on one disk. These hardware resources provided sufficient capacity to run Mythril analyses in parallel while maintaining stable execution across batches.
+
+Using a fixed hardware and software environment helped ensure that the evaluation was reproducible. In particular, the combination of a pinned Ubuntu release, a fixed Python version, a constant Solidity compiler version, and a dedicated server configuration reduced variability across runs and made the reported results easier to interpret.
+
+\subsubsection{Execution procedure}
+
+The Mythril experiments were executed through the \texttt{select\_run.py} script. The script was launched inside a \texttt{screen} session so that long-running analyses could continue after disconnection from the SSH session. A typical run used the following command pattern:
+\begin{verbatim}
+python Code/select_run.py Data/Dataset_test --mode range --start 1 --end 4001 --workers 8 --timeout 120 --outdir results/test
+\end{verbatim}
+
+The timeout was set to 120 seconds per file, and up to eight worker threads were used for parallel execution. The batch execution strategy was chosen to keep the analysis practical for a dataset of several thousand contracts. Using \texttt{screen} also made the process robust to temporary terminal disconnections, which is important for experiments that may run for an extended period.
+
+\subsubsection{File selection logic}
+
+The script traverses the dataset root and expects one subdirectory per class label. For each label, it collects all Solidity files recursively and then selects contracts according to the chosen mode. In range mode, files are sorted by numeric filename and then sliced according to the requested interval. This approach provides deterministic batch selection and ensures that all classes are processed in a consistent way.
+
+The inclusion of \texttt{SAFE} as a dedicated folder is important because it allows the evaluation framework to treat safe contracts as a separate negative class rather than mixing them with vulnerable categories. This structure is also aligned with the binary evaluation used later in the analysis.
+
+\subsubsection{Mythril invocation}
+
+For each selected Solidity contract, the analysis pipeline invokes Mythril through its command-line interface using the \texttt{analyze} subcommand. The tool is executed with the \texttt{jsonv2} output format in order to obtain machine-readable results, rather than relying on free-form textual output. This design choice is essential for reproducibility, because the downstream evaluation logic can parse the reported findings deterministically and map them to the benchmark labels.
+
+To ensure that the analysis remains computationally bounded, the script passes the \texttt{--execution-timeout} parameter to Mythril for every file. This timeout is distinct from the outer process timeout used by the Python \texttt{subprocess} call, which provides an additional safety margin in case Mythril fails to terminate cleanly within its configured execution window. In practice, this means that a contract can fail either because Mythril reports an analysis error, because the JSON output cannot be parsed, or because the process exceeds the allowed time budget.
+
+The implementation records several pieces of metadata for each analyzed contract. These include the input path, the wall-clock execution time, the subprocess return code, the parsed issues, and the logs embedded in Mythril's JSON output. The raw standard output and standard error streams are also preserved in truncated form. This makes the pipeline auditable, since each evaluation decision can be traced back to the original Mythril response if manual inspection is required.
+
+The parsing routine explicitly distinguishes between successful analyses and malformed or incomplete outputs. If the JSON payload can be decoded and the relevant fields are extracted, the run is marked as \texttt{ok}. If Mythril returns no parseable JSON, or if the output contains a traceback or other runtime failure, the run is labeled accordingly as \texttt{invalid\_json} or \texttt{error}. If the process exceeds the configured limit, the run is marked as \texttt{timeout}. This separation is important because it prevents runtime failures from being conflated with legitimate negative classifications.
+
+\subsubsection{Label mapping}
+
+The transformation from Mythril output to benchmark labels is based primarily on SWC identifiers \cite{noauthor_smart_nodate}. Each issue reported by Mythril may contain an SWC ID, such as \texttt{SWC-107} or \texttt{SWC-104}, which is then mapped to the corresponding benchmark class. This mapping ensures that the evaluation follows a consistent vulnerability taxonomy rather than depending on the exact wording of Mythril's textual descriptions.
+
+In addition to direct SWC mapping, the implementation includes a keyword-based fallback for cases in which Mythril does not provide a recognizable SWC identifier. The title and description of an issue are inspected for vulnerability-related terms such as \texttt{delegatecall}, \texttt{reentrancy}, \texttt{overflow}, \texttt{underflow}, \texttt{unchecked call}, and \texttt{block.timestamp}. This fallback improves robustness when Mythril emits semantically meaningful findings without a stable SWC code.
+
+If no findings are reported and the run completed successfully, the contract is classified as \texttt{SAFE}. If one or more vulnerability labels are detected in the same contract, the script concatenates them into a semicolon-separated label set. For the strict multiclass evaluation, cases with multiple predicted vulnerability labels are mapped to the special category \texttt{MULTI}. This allows the evaluation to distinguish single-label predictions from multi-label outputs without discarding the additional information.
+
+\subsubsection{Evaluation logic}
+
+The analysis produces three complementary evaluation views. The first is a binary classification setting, in which each contract is treated as either \texttt{SAFE} or \texttt{UNSAFE}. In this view, any vulnerable label is collapsed into the unsafe class, and the objective is to measure Mythril's ability to separate vulnerable contracts from non-vulnerable ones.
+
+The second view is a one-vs-rest evaluation. Here, each vulnerability class is considered individually against the union of all remaining classes. For example, the \texttt{RE} class is evaluated by treating contracts labeled \texttt{RE} as positive examples and all \texttt{SAFE} and non-\texttt{RE} contracts as negative examples. This setup yields class-specific precision, recall, F1-score, and accuracy values, which are useful for comparing how well Mythril handles different vulnerability types.
+
+The third view is a strict multiclass evaluation. In this setting, the predicted label must match the ground-truth label exactly. The label space includes \texttt{SAFE}, \texttt{BN}, \texttt{DE}, \texttt{EF}, \texttt{OF}, \texttt{RE}, \texttt{SE}, \texttt{TP}, \texttt{UC}, and \texttt{MULTI}. This stricter formulation is particularly informative because it penalizes predictions that are semantically related but not exact, as well as predictions that assign more than one vulnerability class to a single contract.
+
+Only analyses with Mythril status \texttt{ok} are included in the final summary statistics. This filter excludes timeouts, malformed outputs, and runtime errors, thereby ensuring that the reported metrics reflect valid analyses only. The script exports the final results to a set of CSV files, including binary metrics, binary summary statistics, binary confusion matrices, one-vs-rest metrics, strict multiclass metrics, strict multiclass summaries, and strict multiclass confusion matrices. These artifacts form the basis for the quantitative analysis presented in the results chapter.
+
+\subsubsection{Output artifacts}
+
+Each run produces three primary data files: \texttt{picked\_files.json}, \texttt{picked\_files.csv}, and \texttt{eval\_input.csv}. The first preserves the raw Mythril outputs and extracted issues for each analyzed file, the second records the label, predicted class, and runtime metadata, and the third provides a compact table for downstream metric computation. The statistics are written into a dedicated \texttt{stats} subdirectory for later inspection and inclusion in the thesis results.
+
+
+\subsection{Evaluation using LLMs}
+
+In addition to the static-analysis baseline, this thesis evaluates large language models as contract-level classifiers for Solidity vulnerability detection. The LLM experiments are executed locally through Ollama, which provides a consistent inference interface across models and avoids dependence on external APIs. Each Solidity contract is processed independently, and the model output is converted into a structured JSON representation so that the predictions can be evaluated with the same general protocol used for the static-analysis baseline.
+
+\subsubsection{Models Choices}
+
+The LLM evaluation is carried out with a set of locally available models selected for their suitability for code understanding and security-oriented reasoning. The initial models used in the experiments are:
+\begin{itemize}
+    \item \texttt{qwen2.5-coder:7b}\cite{noauthor_qwen25-coder_nodate}
+    \item \texttt{qwen2.5-coder-auditor}\cite{noauthor_alpernaeqwen25-auditor_nodate}
+    \item \texttt{llama3.1:8b}\cite{noauthor_llama31_nodate}
+\end{itemize}
+
+Additional models may be added later under the same evaluation pipeline. This setup is intentionally model-agnostic: the model name is passed as a runtime parameter, which makes it possible to compare several models under identical preprocessing, prompting, parsing, and scoring conditions. As a result, performance differences can be interpreted more directly as differences in model behavior rather than differences in the surrounding infrastructure.
+
+All model calls are executed with temperature set to \texttt{0}. This configuration reduces output variability and is appropriate for benchmark-style experiments, where reproducibility is more important than generative diversity. In this setting, the LLM is used as a structured vulnerability classifier over a fixed label schema rather than as a free-form assistant.
+
+\subsubsection{Prompt engineering}
+
+To study the effect of instruction style on model behavior, four prompt variants are used for each model:
+\begin{itemize}
+    \item \textbf{Precision prompt} (\texttt{precision.txt}), which instructs the model to be conservative and to report a vulnerability only when the evidence is explicit.
+    \item \textbf{Evidence prompt} (\texttt{evidence.txt}), which emphasizes direct code evidence and discourages speculation beyond what is visible in the Solidity source.
+    \item \textbf{One-vulnerability prompt} (\texttt{oneVuln.txt}), which asks the model to evaluate each vulnerability field independently and prevents one detected issue from influencing the others.
+    \item \textbf{Balanced prompt} (\texttt{balanced.txt}), which combines conservative reasoning with strict output formatting and direct instructions to analyze only the listed categories.
+\end{itemize}
+
+All four prompts share the same output schema. The model is required to return a JSON object containing Boolean fields for \texttt{timestamp\_dependency}, \texttt{block\_number\_dependency}, \texttt{ether\_strict\_equality}, \texttt{ether\_frozen}, \texttt{reentrancy}, \texttt{integer\_overflow}, \texttt{dangerous\_delegatecall}, \texttt{unchecked\_external\_call}, and \texttt{safe}, together with a short \texttt{reason} field. Because the schema remains constant across prompts, the influence of prompt wording can be studied without changing the downstream evaluation process.
+
+The prompts differ mainly in how strongly they constrain the model's reasoning. The precision, evidence, and one-vulnerability prompts all explicitly discourage speculation and encourage field-by-field judgment, while the balanced prompt reinforces both conservative classification and valid JSON output. In every case, the model is instructed to use only the Solidity code provided and to return no markdown, no code fences, and no explanations outside the JSON object.
+
+The prompt templates are stored externally rather than hard-coded in the inference script. This allows prompt variants to be swapped or expanded without modifying the core pipeline and makes it easier to compare instruction strategies systematically. At runtime, the Solidity code is inserted into the prompt through a \texttt{\{code\}} placeholder, and the input is truncated to the first 12{,}000 characters in order to keep the request within a manageable context size.
+
+\subsubsection{Inference pipeline and output normalization}
+
+The batch inference process is implemented in a Python script that scans a dataset directory recursively for Solidity files and selects a user-defined range through the \texttt{--start} and \texttt{--end} arguments. This makes it possible to evaluate large datasets incrementally in batches, which is useful for long-running local experiments. The selected contracts are grouped by parent folder, and the results for each group are written to CSV files.
+
+For each contract, the script derives the ground-truth label from the file path. Contracts located in a \texttt{SAFE} directory are assigned the \texttt{SAFE} label, whereas contracts under an \texttt{UNSAFE} directory inherit the vulnerability label from the next path component. The Solidity source code is read as plain text, inserted into the chosen prompt template, and submitted to the Ollama chat API. The execution time for each inference call is recorded so that the per-contract runtime can be retained together with the predictions.
+
+The raw LLM response is then parsed into a structured JSON object. Since LLM outputs are not always perfectly formatted, the pipeline includes a recovery mechanism that removes Markdown code fences, repairs common escaping issues, and extracts the substring between the first opening brace and the last closing brace when necessary. This makes the evaluation more robust to minor formatting deviations without changing the semantic content of the prediction.
+
+After parsing, the result is normalized into a fixed internal representation. Each expected field is converted to a Boolean value, and the \texttt{reason} field is preserved as a short string. A consistency rule is also enforced: if any vulnerability field is predicted as true, the contract is automatically marked as not safe; if no vulnerability is predicted and the model did not explicitly set \texttt{safe}, the contract is treated as safe by default. This normalization ensures that all predictions follow a coherent schema before they are passed to the evaluation stage.
+
+\subsubsection{Evaluation protocol}
+
+The statistical evaluation of the LLM outputs follows the same three perspectives used for the Mythril baseline. First, a binary evaluation reduces the task to distinguishing \texttt{SAFE} from \texttt{UNSAFE}. In this setting, any prediction that activates at least one vulnerability field is treated as unsafe, whereas a prediction with no active vulnerability fields and a valid safe signal is treated as safe.
+
+Second, a one-vs-rest evaluation is computed for each vulnerability class. For each label, the corresponding Boolean output field is interpreted as the positive prediction, and the performance is measured against contracts from that class and the safe class. This produces per-class precision, recall, F1-score, and accuracy values, allowing the behavior of each model and prompt combination to be studied at the level of individual vulnerability categories.
+
+Third, a strict multiclass evaluation is performed. If no vulnerability field is active, the prediction is mapped to \texttt{SAFE}; if exactly one vulnerability field is active, the corresponding benchmark label is used; and if several vulnerability fields are active simultaneously, the prediction is mapped to the special label \texttt{MULTI}. This view is useful because it measures whether the LLM can produce a single exact class prediction rather than only a general vulnerability signal.
+
+Only rows with status \texttt{ok} are included in the statistical summaries. The evaluation script exports binary metrics, binary summaries, binary confusion matrices, one-vs-rest metrics, strict multiclass metrics, strict multiclass summaries, and strict multiclass confusion matrices as CSV files. This output structure mirrors the one used for the Mythril baseline and supports direct methodological comparison between the LLM-based approach and the static-analysis baseline.
+
+\subsection{LLM-generated dataset evaluation}
+
+In the revised experimental setup, the benchmark dataset is no longer taken from a pre-labeled external corpus. Instead, the contracts are generated directly by a large language model and then evaluated in a multi-stage pipeline. This approach makes it possible to study not only how well the models classify Solidity code, but also how reliably they produce compilable contracts and how their outputs behave under static analysis. The evaluation therefore shifts from a traditional benchmark comparison to a generation-and-analysis workflow.
+
+The dataset is created by prompting the generation model with a fixed set of Solidity task descriptions. Each prompt is repeated multiple times so that a sufficiently large collection of contracts can be produced for analysis. The resulting contracts are stored together with generation metadata, including the prompt identifier, the model used, the temperature setting, the run number, and the file paths of both the generated Solidity source and the raw text output. This structure makes the generation process reproducible and allows each contract to be traced back to the exact prompt and model configuration that produced it.
+
+Once the contracts have been generated, they are compiled and filtered before further analysis. Compilation is used as a first quality gate, since many generated contracts contain syntax errors, missing imports, or invalid Solidity constructs. The compilation step therefore separates contracts that can be analyzed meaningfully from those that fail at the language level. Recording compilation outcomes is important because compilation success itself is already an informative result in this setting: it reflects how well the generation model follows Solidity syntax and project structure.
+
+\subsubsection{Generation stage}
+
+The generation stage uses a local LLM through the Ollama interface. For each Solidity task prompt, the model is asked to generate a contract in Solidity source form. The generation setup is intentionally kept fixed across experiments so that model behavior can be compared under controlled conditions. In particular, the same prompt set, temperature, and repetition count are used for all runs, which makes it possible to compare models and prompt variants on equal footing.
+
+Each generated contract is assigned a unique contract identifier and written to disk together with a raw text export of the model response. The metadata also records the task prompt from which the contract originated. This is important because the study later compares different prompt styles, and the generated dataset must therefore preserve the link between a contract and its originating prompt. The generation output is thus treated as a structured experimental artifact rather than as a simple collection of source files.
+
+\subsubsection{Compilation filtering}
+
+Before any vulnerability analysis is performed, the generated Solidity contracts are compiled. Contracts that fail to compile are retained in the dataset, but they are marked separately so that they can be excluded from later security analysis when necessary. This design reflects the fact that a contract that does not compile cannot meaningfully be analyzed by Mythril or compared to LLM-based vulnerability judgments in the same way as a valid contract.
+
+The compilation results are stored in a dedicated CSV file containing the compilation status, return code, and compiler error message when available. This makes it possible to compute the compilation rate of the generation model and to inspect the most frequent failure modes. In practice, compilation errors often reveal systematic weaknesses in the generated code, such as incorrect import paths, invalid type usage, or inconsistent Solidity syntax.
+
+The compile filter is also used to define the evaluation subset for downstream analysis. Only compilable contracts are passed to Mythril and to the LLM analysis stage, which ensures that the security evaluation is performed on source code that at least satisfies the syntactic requirements of the compiler. This is a stricter and more realistic setup than evaluating only on a pre-labeled dataset, because it reflects how generated code would behave in an actual development environment.
+
+\subsubsection{Mythril baseline on generated code}
+
+After compilation, the valid contracts are analyzed with Mythril. In this phase, Mythril no longer serves as a benchmark tool for comparing against a labeled dataset; instead, it becomes a static-analysis stage applied to LLM-generated source code. The goal is to characterize what kinds of vulnerabilities appear in generated contracts and how often the static analyzer flags them.
+
+The Mythril output is parsed in the same way as in the earlier evaluation pipeline, using issue metadata and vulnerability identifiers to map findings to the internal label schema. Contracts with no relevant findings are treated as safe, while contracts with one or more findings are mapped to their corresponding vulnerability classes. If several vulnerability classes are identified in the same contract, the result is treated as a multi-label case. This preserves the structure of the analysis while acknowledging that generated contracts may contain more than one issue at once.
+
+Because the contracts were generated rather than hand-labeled, Mythril now provides a reference analysis of the generated code rather than a ground-truth benchmark label. This distinction is important. In the current study, Mythril is used as an analytical baseline for the generated dataset, not as an oracle of truth. Its role is therefore to describe the vulnerability landscape of the generated contracts and to provide a comparison point for the LLM-based security judgments.
+
+\subsubsection{LLM analysis of generated code}
+
+In the final stage of the pipeline, the generated contracts are analyzed again using large language models. The same model family may be used, or a different model may be selected for comparison. The analysis is performed through prompt templates that ask the model to inspect each contract and decide whether specific vulnerability categories are present. The output is normalized into a structured JSON format so that the results can be compared consistently across prompt variants and models.
+
+This stage differs from the earlier LLM evaluation because the input contracts are not drawn from a labeled benchmark but are instead produced by the generation model itself. The task is therefore not to match a gold label, but to compare the LLM's judgment with Mythril's findings and with the structural quality of the generated source code. This setup makes it possible to study whether the LLM can identify vulnerabilities in code that it or another model has generated, and whether prompt wording changes the model's tendency to detect or miss issues.
+
+The prompt templates are intentionally varied so that different reasoning styles can be tested on the same generated contracts. Some prompts emphasize precision and conservative judgment, while others focus on evidence or on evaluating one vulnerability at a time. Since the contracts and the downstream analysis are held constant, differences in output can be attributed more confidently to prompt design.
+
+\subsubsection{Merged analysis and statistics}
+
+After generation, compilation, Mythril analysis, and LLM analysis have been completed, the results are merged into a single master dataset. Each row in this merged file corresponds to one generated contract and includes the generation metadata, compilation status, Mythril output, LLM output, and agreement indicators between Mythril and the LLM. This merged structure provides the basis for the statistical analysis in the results chapter.
+
+The final evaluation focuses on several levels of evidence. First, the study reports how many generated contracts compile successfully. Second, it reports how many of the compilable contracts are classified as safe or unsafe by Mythril and by the LLM. Third, it examines agreement between Mythril and the LLM on a contract-by-contract basis. Finally, the results are broken down by prompt variant so that the effect of prompt wording on the final outcomes can be assessed.
+
+This pipeline is particularly suitable for the present thesis because it captures the full lifecycle of generated smart contracts: generation, validation, static analysis, and LLM-based interpretation. Rather than treating the dataset as fixed and externally labeled, the evaluation now studies the interaction between model generation quality and downstream vulnerability analysis. This makes the results more representative of the actual use case in which LLMs are used to produce and inspect Solidity code.
+
+\section{Results}
+The results concerns the part where I used already made dataset and also where I used a LLM to create and then analyze the newly created smart contracts.
+
+\subsection{Mythril results}
+
+The evaluation of Mythril shows that the tool provides a measurable but limited signal for vulnerability detection on the selected smart contract benchmark. Considering only contracts included in the final evaluation, the dataset contained 5{,}533 instances. In the binary setting, where predictions were reduced to \texttt{SAFE} versus \texttt{UNSAFE}, Mythril achieved an accuracy of 0.538 and a macro F1-score of 0.528. These values indicate that the tool performs somewhat better than random guessing, but that its overall discrimination between safe and unsafe contracts remains only moderate.
+
+The binary class-wise results reveal an asymmetric behavior. For the \texttt{SAFE} class, Mythril obtained a precision of 0.493, a recall of 0.431, and an F1-score of 0.460. For the \texttt{UNSAFE} class, it achieved a precision of 0.567, a recall of 0.628, and an F1-score of 0.596. This pattern suggests that Mythril is more effective at flagging vulnerable contracts than at confidently recognizing safe ones.
+
+This behavior is also visible in the binary confusion matrix. Out of 2{,}528 safe contracts, 1{,}089 were correctly classified as \texttt{SAFE}, while 1{,}439 were classified as \texttt{UNSAFE}. Conversely, among 3{,}005 unsafe contracts, 1{,}887 were correctly identified as unsafe and 1{,}118 were incorrectly classified as safe. The results therefore show both a substantial false-positive rate and a substantial false-negative rate, which limits the usefulness of Mythril as a standalone classifier in this setting.
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.5\linewidth]{Graphs/mythril/mythril_binary_confusion_matrix.png}
+    \caption{Mythril binary confusion matrix}
+    \label{fig:mythril_binary_conf_mat}
+\end{figure}
+The strict multiclass evaluation paints a more challenging picture. When the prediction was required to match the exact benchmark label, Mythril reached an accuracy of 0.281 and a macro F1-score of 0.154, excluding the artificial \texttt{MULTI} category. The large drop relative to the binary setting indicates that even when Mythril correctly identifies a contract as vulnerable in broad terms, it often fails to assign the exact benchmark class.
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.5\linewidth]{Graphs/mythril/mythril_strict_multiclass_f1_support.png}
+    \caption{Mythril strict multiclass f1 results}
+    \label{fig:placeholder}
+\end{figure}
+
+The class-wise strict multiclass metrics show strong variation across vulnerability types. The best-performing categories were \texttt{SAFE}, with an F1-score of 0.461, \texttt{DE}, with an F1-score of 0.403, and \texttt{RE}, with an F1-score of 0.312. By contrast, the performance for \texttt{BN}, \texttt{EF}, \texttt{OF}, \texttt{SE}, \texttt{TP}, and \texttt{UC} was weak, with \texttt{EF} and \texttt{TP} reaching an F1-score of 0.0 and \texttt{UC} only 0.012. These results suggest that Mythril is more reliable for a small subset of vulnerability families than for the full range of benchmark classes.
+
+The one-vs-rest evaluation confirms this uneven class behavior. In this setting, \texttt{DE} achieved the highest precision at 0.821 and the highest F1-score at 0.610, while \texttt{RE} obtained the highest recall at 0.548 and an F1-score of 0.458. \texttt{UC} also showed relatively high precision at 0.433, but with a much lower recall of 0.139, which reduced its F1-score to 0.211. By comparison, \texttt{TP} was not detected at all, with precision, recall, and F1-score all equal to 0.0.
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.5\linewidth]{Graphs/mythril/mythril_one_vs_rest_performance.png}
+    \caption{Mythril one-vs-rest performance graph}
+    \label{fig:mythril_one_perf}
+\end{figure}
+
+The strict multiclass confusion matrix further illustrates the nature of the errors. A large number of safe contracts were misclassified as \texttt{RE}, \texttt{OF}, and \texttt{MULTI}, while contracts belonging to \texttt{RE} and \texttt{UC} were frequently assigned to \texttt{SAFE}, \texttt{RE}, or \texttt{MULTI}. This pattern suggests that Mythril often produces broad or overlapping findings rather than a single clean category aligned with the benchmark taxonomy.
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.5\linewidth]{Graphs/mythril/mythril_strict_multiclass_confusion_matrix.png}
+    \caption{Mythril strict multiclass confusion matrix}
+    \label{fig:mythril_multi_conf_mat}
+\end{figure}
+Overall, the results show that Mythril has practical value for identifying potentially unsafe contracts, but that its effectiveness decreases substantially when the task requires fine-grained vulnerability categorization. Its moderate binary performance indicates that it can capture vulnerability-related signals, yet the weak strict multiclass results show that these signals are often not precise enough for accurate class-level prediction.
+
+\subsection{LLMs results}
+\subsubsection{qwen2.5-coder:7b}
+
+Across the four prompts, qwen2.5-coder:7b shows a clear sensitivity to prompt wording, but the overall pattern remains stable: the model performs better on the binary task than on the strict multiclass task. The strongest prompt is \texttt{evidence}, which reaches a binary accuracy of 0.651 and a binary macro F1-score of 0.643, while also producing the best strict multiclass result with an accuracy of 0.323 and a macro F1-score excluding \texttt{MULTI} of 0.200. By contrast, \texttt{balanced} is the weakest prompt on the multiclass side and also trails the other prompts in binary performance.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.5\linewidth]{Graphs/qwen2.5-coder:7b/prompt_comparison.png}
+    \caption{Comparison of binary and strict multiclass performance across prompts for qwen2.5-coder:7b.}
+    \label{fig:qwen-coder-prompt-comparison}
+\end{figure}
+
+The binary results show that the model is generally more effective at identifying \texttt{UNSAFE} contracts than at recognizing \texttt{SAFE} contracts. For \texttt{balanced}, the \texttt{UNSAFE} class reaches a recall of 0.833 and an F1-score of 0.694, while \texttt{SAFE} has a recall of only 0.392 and an F1-score of 0.500. The same asymmetry appears across the other prompts, although the exact balance shifts slightly depending on the wording of the instruction.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.5\linewidth]{Graphs/qwen2.5-coder:7b/SAFE_vs_UNSAFE_recall_by_prompt.png}
+    \caption{SAFE and UNSAFE recall across prompts for qwen2.5-coder:7b.}
+    \label{fig:qwen-coder-safe-unsafe-recall}
+\end{figure}
+
+The prompt comparison indicates that \texttt{evidence} gives the most balanced overall behavior for this model. It has the best binary macro F1-score, the best strict multiclass score, and a stronger \texttt{SAFE} recall than \texttt{balanced}, while still keeping \texttt{UNSAFE} recall high. \texttt{precision} is close behind, whereas \texttt{oneVuln} sits between \texttt{precision} and \texttt{balanced}. This suggests that qwen2.5-coder:7b benefits from prompts that emphasize direct evidence and explicit code-grounded reasoning.
+
+At the class level, the strict multiclass results show that the model is most reliable on \texttt{SAFE}, \texttt{BN}, \texttt{OF}, and \texttt{RE}, while \texttt{EF} remains undetected across all prompts. The best class-specific score in the one-vs-rest evaluation is usually \texttt{UC}, which reaches the strongest overall F1 behavior among the vulnerability classes. \texttt{DE} can achieve very high recall under some prompts, but this often comes at the cost of precision, indicating that the model tends to over-flag that class.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.5\linewidth]{Graphs/qwen2.5-coder:7b/strict_multiclass_F1_by_prompt.png}
+    \caption{Strict multiclass F1-score by class and prompt for qwen2.5-coder:7b.}
+    \label{fig:qwen-coder-strict-multiclass-f1}
+\end{figure}
+
+Overall, qwen2.5-coder:7b appears to be a reasonably strong detector for coarse-grained vulnerability screening, but its exact class assignment remains limited. The prompt choice changes the scores, yet it does not alter the broader pattern: binary performance is consistently better than strict multiclass performance, and the model tends to favor vulnerability detection over safe recognition.
+\subsubsection{qwen2.5-coder-auditor}
+\subsubsection{llama3.1-8b}
+
+Across the four prompts, llama3.1-8b shows a weaker overall performance than qwen2.5-coder:7b, but it still follows the same general trend: binary classification is substantially easier for the model than strict multiclass classification. The strongest binary result is obtained with \texttt{oneVuln}, which reaches an accuracy of 0.538 and a binary macro F1-score of 0.431. In the strict multiclass setting, \texttt{oneVuln} also performs best, with an accuracy of 0.182 and a macro F1-score excluding \texttt{MULTI} of 0.118, although the margin over the other prompts is small.
+
+The binary results indicate a strong bias toward predicting \texttt{UNSAFE} contracts. Under \texttt{oneVuln}, \texttt{UNSAFE} recall reaches 0.940, whereas \texttt{SAFE} recall drops to only 0.108. The same asymmetry appears in the other prompts as well: \texttt{UNSAFE} recall remains consistently high, while \texttt{SAFE} recall stays below 0.21 in every configuration. This suggests that llama3.1-8b is conservative in the sense that it prefers to flag vulnerabilities rather than miss them, but this comes at the cost of many false positives on safe contracts.
+
+The prompt comparison shows only moderate variation. \texttt{precision} gives the best binary macro F1-score at 0.468, while \texttt{oneVuln} gives the best accuracy but the weakest binary macro balance. In the strict multiclass setting, the values remain clustered between 0.170 and 0.184 accuracy, with macro F1 scores between 0.101 and 0.118 excluding \texttt{MULTI}. This indicates that prompt wording changes the balance slightly, but it does not fundamentally improve the model’s fine-grained class assignment.
+
+At the class level, the strict multiclass results show that \texttt{SAFE} is consistently weak, while \texttt{DE} is the strongest vulnerability class in every prompt. The one-vs-rest analysis confirms this pattern: \texttt{DE} reaches very high recall, especially under \texttt{balanced}, where recall is 0.928 and F1-score is 0.614. By contrast, \texttt{EF} remains completely undetected across all prompts, and \texttt{SE} and \texttt{OF} also remain weak.
+
+Overall, llama3.1-8b behaves as a high-recall, low-specificity detector. It is more willing to label a contract as vulnerable than to classify it as safe, and while this behavior can be useful for coarse screening, it limits the model’s usefulness for precise multiclass vulnerability attribution.
+
+\subsection{SC Generation \& Results}
+
+\section{Discussion}
+\section{Conclusion}
+\newpage
+\section*{Raw Results}
+\begin{table}[htbp]
+\centering
+\caption{Overall Mythril evaluation results}
+\label{tab:mythril_overall}
+\begin{tabular}{lrr}
+\hline
+Evaluation view & Metric & Value \\
+\hline
+Binary & Accuracy & 0.538 \\
+Binary & Macro F1 & 0.528 \\
+Strict multiclass & Accuracy & 0.281 \\
+Strict multiclass & Macro F1 excluding MULTI & 0.154 \\
+Final evaluated rows & Contracts analyzed successfully & 5{,}533 \\
+\hline
+\end{tabular}
+\end{table}
+
+\begin{table}[htbp]
+\centering
+\caption{Binary classification results}
+\label{tab:mythril_binary}
+\begin{tabular}{lrrrr}
+\hline
+Class & Precision & Recall & F1 & Support \\
+\hline
+SAFE & 0.493 & 0.431 & 0.460 & 2{,}528 \\
+UNSAFE & 0.567 & 0.628 & 0.596 & 3{,}005 \\
+\hline
+\end{tabular}
+\end{table}
+
+\begin{table}[htbp]
+\centering
+\caption{One-vs-rest Mythril results}
+\label{tab:mythril_ovr}
+\begin{tabular}{lrrrrr}
+\hline
+Label & Precision & Recall & F1 & Accuracy & Positive support \\
+\hline
+BN & 0.152 & 0.444 & 0.227 & 0.866 & 117 \\
+DE & 0.821 & 0.485 & 0.610 & 0.984 & 66 \\
+EF & 0.108 & 0.119 & 0.113 & 0.952 & 67 \\
+SE & 0.228 & 0.054 & 0.088 & 0.902 & 239 \\
+OF & 0.077 & 0.138 & 0.099 & 0.664 & 391 \\
+RE & 0.393 & 0.548 & 0.458 & 0.630 & 1{,}007 \\
+TP & 0.000 & 0.000 & 0.000 & 0.952 & 128 \\
+UC & 0.433 & 0.139 & 0.211 & 0.706 & 990 \\
+\hline
+\end{tabular}
+\end{table}
+
+\begin{table}[htbp]
+\centering
+\caption{Strict multiclass Mythril results}
+\label{tab:mythril_multiclass}
+\begin{tabular}{lrrrr}
+\hline
+Label & Precision & Recall & F1 & Support \\
+\hline
+SAFE & 0.493 & 0.432 & 0.461 & 2{,}528 \\
+BN & 0.061 & 0.068 & 0.064 & 117 \\
+DE & 0.453 & 0.364 & 0.403 & 66 \\
+EF & 0.000 & 0.000 & 0.000 & 67 \\
+OF & 0.070 & 0.092 & 0.079 & 391 \\
+RE & 0.267 & 0.376 & 0.312 & 1{,}007 \\
+SE & 0.389 & 0.029 & 0.054 & 239 \\
+TP & 0.000 & 0.000 & 0.000 & 128 \\
+UC & 0.194 & 0.006 & 0.012 & 990 \\
+MULTI & 0.000 & 0.000 & 0.000 & 0 \\
+\hline
+\end{tabular}
+\end{table}
+
+\begin{table}[htbp]
+\centering
+\caption{Binary confusion matrix}
+\label{tab:mythril_binary_cm}
+\begin{tabular}{lrr}
+\hline
+Actual \textbackslash{} Predicted & SAFE & UNSAFE \\
+\hline
+SAFE & 1{,}089 & 1{,}439 \\
+UNSAFE & 1{,}118 & 1{,}887 \\
+\hline
+\end{tabular}
+\end{table}
+
+\begin{table}[htbp]
+\centering
+\caption{Strict multiclass confusion matrix}
+\label{tab:mythril_multiclass_cm}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{lrrrrrrrrrr}
+\hline
+Actual \textbackslash{} Predicted & SAFE & BN & DE & EF & OF & RE & SE & TP & UC & MULTI \\
+\hline
+SAFE & 1{,}093 & 70 & 4 & 15 & 316 & 544 & 9 & 0 & 13 & 464 \\
+BN & 35 & 8 & 0 & 0 & 13 & 1 & 0 & 0 & 3 & 57 \\
+DE & 21 & 0 & 24 & 0 & 3 & 1 & 0 & 0 & 0 & 17 \\
+EF & 21 & 0 & 25 & 0 & 3 & 1 & 0 & 0 & 0 & 17 \\
+OF & 209 & 9 & 0 & 1 & 36 & 108 & 0 & 0 & 0 & 28 \\
+RE & 364 & 12 & 0 & 2 & 36 & 379 & 1 & 0 & 7 & 206 \\
+SE & 58 & 6 & 0 & 2 & 61 & 1 & 7 & 0 & 2 & 102 \\
+TP & 51 & 15 & 0 & 4 & 13 & 5 & 0 & 0 & 0 & 40 \\
+UC & 367 & 12 & 0 & 2 & 36 & 379 & 1 & 0 & 6 & 187 \\
+MULTI & 0 & 0 & 0 & 0 & 0 & 0 & 0 & 0 & 0 & 0 \\
+\hline
+\end{tabular}%
+}
+\end{table}
+\newpage
+\printbibliography
+
+\end{document}
